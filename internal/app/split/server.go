@@ -1,0 +1,208 @@
+package split
+
+import (
+	"encoding/json"
+	"errors"
+	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
+	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
+	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+type Server struct {
+	configuration *config.Configuration
+	logger        *logrus.Logger
+	router        *mux.Router
+	db            *storage.Storage
+}
+
+func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage) *Server {
+	return &Server{
+		configuration: configuration,
+		logger:        log,
+		router:        mux.NewRouter(),
+		db:            db,
+	}
+}
+
+func (s *Server) Start() error {
+	s.configureRouter()
+
+	s.logger.Info("starting server on port ", s.configuration.BindAddress)
+
+	return http.ListenAndServe(s.configuration.BindAddress, s.router)
+}
+
+func (s *Server) configureRouter() {
+	s.router.HandleFunc("/api/healthz", s.handleHealthz()).Methods(http.MethodGet)
+
+	s.router.HandleFunc("/api/history", s.handleHistory()).Methods(http.MethodGet)
+	s.router.HandleFunc("/api/bills", s.handleCreateBill()).Methods(http.MethodPost)
+	s.router.HandleFunc("/api/bills/{id}", s.handleGetBill()).Methods(http.MethodGet)
+	s.router.HandleFunc("/api/bills/{id}", s.handleTimeoutBill()).Methods(http.MethodPatch)
+
+	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
+}
+
+func (s *Server) handleHealthz() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		renderJSON(w, "ok")
+	}
+}
+
+func (s *Server) handleCreateBill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req createBillRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			renderErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+		if req.DestAddress == "" || req.Goal == "" {
+			renderErr(w, http.StatusBadRequest, "dest_address and goal are required")
+			return
+		}
+		goal, err := parseInt64(req.Goal)
+		if err != nil || goal <= 0 {
+			renderErr(w, http.StatusBadRequest, "goal must be positive int64 (nanoton)")
+			return
+		}
+
+		ctx := r.Context()
+		bill, err := s.db.CreateBill(ctx, goal, req.DestAddress)
+		if err != nil {
+			renderErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		resp := billResponse{
+			ID:           bill.ID,
+			Goal:         bill.Goal,
+			Collected:    bill.Collected,
+			DestAddress:  bill.DestAddress,
+			Status:       bill.Status,
+			CreatedAt:    bill.CreatedAt,
+			Transactions: bill.Transactions,
+		}
+		w.WriteHeader(http.StatusCreated)
+		renderJSON(w, resp)
+	}
+}
+
+func (s *Server) handleGetBill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx := r.Context()
+		bill, err := s.db.GetBillWithTransactions(ctx, id)
+		if err != nil {
+			renderErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		renderJSON(w, bill)
+	}
+}
+
+func (s *Server) handleTimeoutBill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx := r.Context()
+		if err := s.db.MarkBillTimeout(ctx, id); err != nil {
+			renderErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (s *Server) handleCreateTransaction() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		billID, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var req createTxRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			renderErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+		if req.Amount == "" || req.SenderAddress == "" || req.OpType == "" {
+			renderErr(w, http.StatusBadRequest, "amount, sender_address and op_type are required")
+			return
+		}
+		amount, err := parseInt64(req.Amount)
+		if err != nil || amount <= 0 {
+			renderErr(w, http.StatusBadRequest, "amount must be positive int64 (nanoton)")
+			return
+		}
+		op, err := parseOpType(req.OpType)
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx := r.Context()
+		tx, err := s.db.AddTransaction(ctx, billID, amount, req.SenderAddress, op)
+		if err != nil {
+			renderErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		renderJSON(w, tx)
+	}
+}
+
+func (s *Server) handleHistory() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sender, err := s.walletFromCookie(r)
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		offset, _ := strconv.Atoi(q.Get("offset"))
+
+		ctx := r.Context()
+		historyItems, err := s.db.GetHistory(ctx, sender, limit, offset)
+		if err != nil {
+			renderErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if len(historyItems) == 0 {
+			renderErr(w, http.StatusNotFound, "history items not found")
+		} else {
+			renderJSON(w, historyItems)
+		}
+	}
+}
+
+func (s *Server) walletFromCookie(r *http.Request) (string, error) {
+	c := r.Header.Get("sender_address")
+	w := strings.TrimSpace(c)
+	if w == "" {
+		return "", errors.New("empty wallet cookie")
+	}
+	if len(w) < 36 {
+		return "", errors.New("invalid wallet address")
+	}
+	return w, nil
+}
