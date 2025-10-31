@@ -1,0 +1,136 @@
+{
+	"info": {
+		"_postman_id": "0d2d29a4-f700-47d1-a792-565f836c1351",
+		"name": "Split API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "21366611",
+		"_collection_link": "https://lunar-moon-950006.postman.co/workspace/My-Workspace~9fa56156-153f-4dc8-8030-140fe03f440f/collection/21366611-0d2d29a4-f700-47d1-a792-565f836c1351?action=share&source=collection_link&creator=21366611"
+	},
+	"item": [
+		{
+			"name": "Get bill by ID",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "sender_address",
+						"value": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://tagwaiter.ru/api/bills/7111f98d-d298-4e9d-8119-6329ce0efa95",
+					"protocol": "https",
+					"host": [
+						"tagwaiter",
+						"ru"
+					],
+					"path": [
+						"api",
+						"bills",
+						"7111f98d-d298-4e9d-8119-6329ce0efa95"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create transaction",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"amount\": \"10000\",\n    \"sender_address\": \"UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR\",\n    \"op_type\": \"CONTRIBUTE\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://tagwaiter.ru/api/bills/7111f98d-d298-4e9d-8119-6329ce0efa95/transactions",
+					"protocol": "https",
+					"host": [
+						"tagwaiter",
+						"ru"
+					],
+					"path": [
+						"api",
+						"bills",
+						"7111f98d-d298-4e9d-8119-6329ce0efa95",
+						"transactions"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "History",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "sender_address",
+						"value": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://tagwaiter.ru/api/history",
+					"protocol": "https",
+					"host": [
+						"tagwaiter",
+						"ru"
+					],
+					"path": [
+						"api",
+						"history"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create bill",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"goal\": \"100000000000\",\n    \"dest_address\": \"UQB3pqex4lL1xQEW366-51VnMpP3fDYQe1DM3ij4qdOT8uxT\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://tagwaiter.ru/api/bills",
+					"protocol": "https",
+					"host": [
+						"tagwaiter",
+						"ru"
+					],
+					"path": [
+						"api",
+						"bills"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

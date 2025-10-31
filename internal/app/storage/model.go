@@ -22,22 +22,23 @@ const (
 )
 
 type Bill struct {
-	ID           uuid.UUID     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	Goal         int64         `gorm:"not null"`
-	Collected    int64         `gorm:"not null;default:0"`
-	DestAddress  string        `gorm:"not null"`
-	CreatedAt    time.Time     `gorm:"autoCreateTime"`
-	Status       Status        `gorm:"type:varchar(16);not null"`
-	Transactions []Transaction `gorm:"foreignKey:BillID"`
+	ID             uuid.UUID     `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	Goal           int64         `json:"goal" gorm:"not null"`
+	Collected      int64         `json:"collected" gorm:"not null;default:0"`
+	CreatorAddress string        `json:"creator_address" gorm:"not null"`
+	DestAddress    string        `json:"dest_address" gorm:"not null"`
+	CreatedAt      time.Time     `json:"created_at" gorm:"autoCreateTime"`
+	Status         Status        `json:"status" gorm:"type:varchar(16);not null"`
+	Transactions   []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
 }
 
 type Transaction struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	BillID        uuid.UUID `gorm:"type:uuid;index"`
-	Amount        int64     `gorm:"not null"`
-	SenderAddress string    `gorm:"not null"`
-	CreatedAt     time.Time `gorm:"autoCreateTime"`
-	OpType        OpType    `gorm:"type:varchar(32);not null"`
+	ID            uuid.UUID `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	BillID        uuid.UUID `json:"bill_id" gorm:"type:uuid;index"`
+	Amount        int64     `json:"amount" gorm:"not null"`
+	SenderAddress string    `json:"sender_address" gorm:"not null"`
+	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
+	OpType        OpType    `json:"op_type" gorm:"type:varchar(32);not null"`
 }
 
 type HistoryItem struct {
