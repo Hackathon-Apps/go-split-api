@@ -12,13 +12,7 @@ jobs:
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v2.3.1
-      - name: install dependencies
-        run: npm install
-      - name: Build
-        run: npm run build
-        env:
-          CI: false
-      - name: Deploy to server
+      - name: Build and Deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -30,11 +24,6 @@ jobs:
             git pull
             make
             systemctl restart go-split-api-daemon.service
-      - name: Deploy to gh-pages
-        uses: JamesIves/github-pages-deploy-action@4.1.4
-        with:
-          branch: gh-pages # The branch the action should deploy to.
-          folder: dist # The folder the action should deploy.
 
 permissions:
   contents: write
