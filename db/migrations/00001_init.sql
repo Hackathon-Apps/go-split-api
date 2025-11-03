@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS op_type
 );
 
 INSERT INTO op_type(name, code)
-values ('CONTRIBUTE', 0x0f325335),
-       ('TRANSFER', 0x6ffa34c0),
-       ('REFUND', 0xc0d15cf0);
+values ('CONTRIBUTE', x'0f325335'),
+       ('TRANSFER', x'6ffa34c0'),
+       ('REFUND', x'c0d15cf0');
 
 CREATE TABLE IF NOT EXISTS bills
 (
