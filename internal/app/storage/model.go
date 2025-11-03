@@ -22,15 +22,15 @@ const (
 )
 
 type Bill struct {
-	ID             uuid.UUID     `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	Goal           int64         `json:"goal" gorm:"not null"`
-	Collected      int64         `json:"collected" gorm:"not null;default:0"`
-	CreatorAddress string        `json:"creator_address" gorm:"not null"`
-	DestAddress    string        `json:"dest_address" gorm:"not null"`
-	CreatedAt      time.Time     `json:"created_at" gorm:"autoCreateTime"`
-	Status         Status        `json:"status" gorm:"type:varchar(16);not null"`
-	Transactions   []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
-	ProxyWallet    string        `json:"proxy_wallet" gorm:"not null"`
+	ID                 uuid.UUID     `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	Goal               int64         `json:"goal" gorm:"not null"`
+	Collected          int64         `json:"collected" gorm:"not null;default:0"`
+	CreatorAddress     string        `json:"creator_address" gorm:"not null"`
+	DestinationAddress string        `json:"destination_address" gorm:"not null"`
+	CreatedAt          time.Time     `json:"created_at" gorm:"autoCreateTime"`
+	Status             Status        `json:"status" gorm:"type:varchar(16);not null"`
+	Transactions       []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
+	ProxyWallet        string        `json:"proxy_wallet" gorm:"not null"`
 }
 
 type Transaction struct {

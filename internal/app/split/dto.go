@@ -16,7 +16,7 @@ type billResponse struct {
 	Goal               int64                 `json:"goal"`
 	Collected          int64                 `json:"collected"`
 	CreatorAddress     string                `json:"creator_address"`
-	DestAddress        string                `json:"dest_address"`
+	DestinationAddress string                `json:"destination_address"`
 	Status             storage.Status        `json:"status"`
 	CreatedAt          time.Time             `json:"created_at"`
 	Transactions       []storage.Transaction `json:"transactions,omitempty"`

@@ -102,7 +102,7 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			Goal:               bill.Goal,
 			Collected:          bill.Collected,
 			CreatorAddress:     bill.CreatorAddress,
-			DestAddress:        bill.DestAddress,
+			DestinationAddress: bill.DestinationAddress,
 			Status:             bill.Status,
 			CreatedAt:          bill.CreatedAt,
 			Transactions:       bill.Transactions,

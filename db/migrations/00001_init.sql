@@ -23,14 +23,14 @@ values ('CONTRIBUTE', 0x0f325335),
 
 CREATE TABLE IF NOT EXISTS bills
 (
-    id              uuid PRIMARY KEY,
-    goal            bigint    not null,
-    collected       bigint    not null default 0,
-    creator_address varchar   not null,
-    dest_address    varchar   not null,
-    created_at      timestamp not null default now(),
-    status          varchar REFERENCES statuses (name),
-    proxy_wallet    varchar   not null
+    id                  uuid PRIMARY KEY,
+    goal                bigint    not null,
+    collected           bigint    not null default 0,
+    creator_address     varchar   not null,
+    destination_address varchar   not null,
+    created_at          timestamp not null default now(),
+    status              varchar REFERENCES statuses (name),
+    proxy_wallet        varchar   not null
 );
 
 CREATE TABLE IF NOT EXISTS transactions
