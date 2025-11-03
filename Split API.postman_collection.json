@@ -16,7 +16,7 @@
 				"method": "GET",
 				"header": [
 					{
-						"key": "sender_address",
+						"key": "Sender-Address",
 						"value": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR",
 						"type": "text"
 					}
@@ -44,10 +44,16 @@
 					"type": "noauth"
 				},
 				"method": "POST",
-				"header": [],
+				"header": [
+					{
+						"key": "Sender-Address",
+						"value": "EQA4heeDPc4xM2rfGa3rGDNfmLczSw_rM6fxC3b40bH_65hV",
+						"type": "text"
+					}
+				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"amount\": \"10000\",\n    \"sender_address\": \"UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR\",\n    \"op_type\": \"CONTRIBUTE\"\n}",
+					"raw": "{\n    \"amount\": \"10000\",\n    \"op_type\": \"CONTRIBUTE\"\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -107,10 +113,16 @@
 					"type": "noauth"
 				},
 				"method": "POST",
-				"header": [],
+				"header": [
+					{
+						"key": "Sender-Address",
+						"value": "EQA4heeDPc4xM2rfGa3rGDNfmLczSw_rM6fxC3b40bH_65hV",
+						"type": "text"
+					}
+				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"goal\": \"100000000000\",\n    \"dest_address\": \"UQB3pqex4lL1xQEW366-51VnMpP3fDYQe1DM3ij4qdOT8uxT\"\n}",
+					"raw": "{\n    \"goal\": \"100000000000\",\n    \"destiantion_address\": \"UQB3pqex4lL1xQEW366-51VnMpP3fDYQe1DM3ij4qdOT8uxT\"\n}",
 					"options": {
 						"raw": {
 							"language": "json"

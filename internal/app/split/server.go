@@ -7,6 +7,7 @@ import (
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"github.com/xssnick/tonutils-go/ton"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,14 +18,16 @@ type Server struct {
 	logger        *logrus.Logger
 	router        *mux.Router
 	db            *storage.Storage
+	tonApiClient  *ton.APIClient
 }
 
-func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage) *Server {
+func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage, api *ton.APIClient) *Server {
 	return &Server{
 		configuration: configuration,
 		logger:        log,
 		router:        mux.NewRouter(),
 		db:            db,
+		tonApiClient:  api,
 	}
 }
 
@@ -60,8 +63,8 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			renderErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
 			return
 		}
-		if req.DestAddress == "" || req.Goal == "" {
-			renderErr(w, http.StatusBadRequest, "dest_address and goal are required")
+		if strings.TrimSpace(req.Goal) == "" {
+			renderErr(w, http.StatusBadRequest, "goal is required")
 			return
 		}
 		goal, err := parseInt64(req.Goal)
@@ -69,22 +72,41 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			renderErr(w, http.StatusBadRequest, "goal must be positive int64 (nanoton)")
 			return
 		}
+		destinationAddr := req.DestinationAddress
+		if destinationAddr == "" {
+			renderErr(w, http.StatusBadRequest, "addresses is required")
+			return
+		}
 
 		ctx := r.Context()
-		bill, err := s.db.CreateBill(ctx, goal, req.DestAddress)
+		creator, err := s.walletFromHeader(r)
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		proxyWalletAddr, err := GenerateTonWalletAddress(s.tonApiClient)
+		if err != nil {
+			renderErr(w, http.StatusInternalServerError, "failed to generate TON address: "+err.Error())
+			return
+		}
+
+		bill, err := s.db.CreateBill(ctx, goal, creator, destinationAddr, proxyWalletAddr)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
 		resp := billResponse{
-			ID:           bill.ID,
-			Goal:         bill.Goal,
-			Collected:    bill.Collected,
-			DestAddress:  bill.DestAddress,
-			Status:       bill.Status,
-			CreatedAt:    bill.CreatedAt,
-			Transactions: bill.Transactions,
+			ID:                 bill.ID,
+			Goal:               bill.Goal,
+			Collected:          bill.Collected,
+			CreatorAddress:     bill.CreatorAddress,
+			DestAddress:        bill.DestAddress,
+			Status:             bill.Status,
+			CreatedAt:          bill.CreatedAt,
+			Transactions:       bill.Transactions,
+			ProxyWalletAddress: proxyWalletAddr,
 		}
 		w.WriteHeader(http.StatusCreated)
 		renderJSON(w, resp)
@@ -141,7 +163,9 @@ func (s *Server) handleCreateTransaction() http.HandlerFunc {
 			renderErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
 			return
 		}
-		if req.Amount == "" || req.SenderAddress == "" || req.OpType == "" {
+
+		sender, err := s.walletFromHeader(r)
+		if req.Amount == "" || sender == "" || req.OpType == "" {
 			renderErr(w, http.StatusBadRequest, "amount, sender_address and op_type are required")
 			return
 		}
@@ -157,7 +181,7 @@ func (s *Server) handleCreateTransaction() http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		tx, err := s.db.AddTransaction(ctx, billID, amount, req.SenderAddress, op)
+		tx, err := s.db.AddTransaction(ctx, billID, amount, sender, op)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -170,7 +194,7 @@ func (s *Server) handleCreateTransaction() http.HandlerFunc {
 
 func (s *Server) handleHistory() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sender, err := s.walletFromCookie(r)
+		sender, err := s.walletFromHeader(r)
 		if err != nil {
 			renderErr(w, http.StatusBadRequest, err.Error())
 			return
@@ -195,14 +219,14 @@ func (s *Server) handleHistory() http.HandlerFunc {
 	}
 }
 
-func (s *Server) walletFromCookie(r *http.Request) (string, error) {
-	c := r.Header.Get("sender_address")
+func (s *Server) walletFromHeader(r *http.Request) (string, error) {
+	c := r.Header.Get("Sender-Address")
 	w := strings.TrimSpace(c)
 	if w == "" {
-		return "", errors.New("empty wallet cookie")
+		return "", errors.New("empty wallet header")
 	}
 	if len(w) < 36 {
-		return "", errors.New("invalid wallet address")
+		return "", errors.New("invalid wallet header")
 	}
 	return w, nil
 }

@@ -18,3 +18,5 @@ goose up
 ```
 
 See API call examples in `./api.http` file.
+
+Special HTTP headers require: `Sender-Address`

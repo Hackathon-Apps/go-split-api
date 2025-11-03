@@ -30,6 +30,7 @@ type Bill struct {
 	CreatedAt      time.Time     `json:"created_at" gorm:"autoCreateTime"`
 	Status         Status        `json:"status" gorm:"type:varchar(16);not null"`
 	Transactions   []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
+	ProxyWallet    string        `json:"proxy_wallet" gorm:"not null"`
 }
 
 type Transaction struct {

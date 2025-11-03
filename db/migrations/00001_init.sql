@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS bills
     creator_address varchar   not null,
     dest_address    varchar   not null,
     created_at      timestamp not null default now(),
-    status          varchar REFERENCES statuses (name)
+    status          varchar REFERENCES statuses (name),
+    proxy_wallet    varchar   not null
 );
 
 CREATE TABLE IF NOT EXISTS transactions

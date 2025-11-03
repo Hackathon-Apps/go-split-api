@@ -1,30 +1,31 @@
-### Get bill
 @id = bill uuid
+
+### Get bill
 GET http://localhost:8081/api/bills/{{id}}
 
 ### Get history info
 GET http://localhost:8081/api/history
-sender_address: UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR
+Sender-Address: UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR
 
 ### Create bill
 POST http://localhost:8081/api/bills
 Content-Type: application/json
+Sender-Address: UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR
 
 {
   "goal": "100000000000",
-  "dest_address": "UQB3pqex4lL1xQEW366-51VnMpP3fDYQe1DM3ij4qdOT8uxT"
+  "destination_address": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR"
 }
 
 ### Create tranasaction
 POST http://localhost:8081/api/bills/{{id}}/transactions
 Content-Type: application/json
+Sender-Address: UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR
 
 {
   "amount": "10000",
-  "sender_address": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR",
   "op_type": "CONTRIBUTE"
 }
-
 
 
 

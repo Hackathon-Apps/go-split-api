@@ -44,12 +44,14 @@ func (s *Storage) Conn() *gorm.DB {
 	return s.conn
 }
 
-func (s *Storage) CreateBill(ctx context.Context, goal int64, dest string) (*Bill, error) {
+func (s *Storage) CreateBill(ctx context.Context, goal int64, creator, dest, proxyWallet string) (*Bill, error) {
 	bill := &Bill{
-		ID:          uuid.New(),
-		Goal:        goal,
-		DestAddress: dest,
-		Status:      StatusActive,
+		ID:             uuid.New(),
+		Goal:           goal,
+		CreatorAddress: creator,
+		DestAddress:    dest,
+		Status:         StatusActive,
+		ProxyWallet:    proxyWallet,
 	}
 
 	if err := s.conn.WithContext(ctx).Create(bill).Error; err != nil {

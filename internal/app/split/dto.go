@@ -7,22 +7,23 @@ import (
 )
 
 type createBillRequest struct {
-	Goal        string `json:"goal"`
-	DestAddress string `json:"dest_address"`
+	Goal               string `json:"goal"`
+	DestinationAddress string `json:"destination_address"`
 }
 
 type billResponse struct {
-	ID           uuid.UUID             `json:"id"`
-	Goal         int64                 `json:"goal"`
-	Collected    int64                 `json:"collected"`
-	DestAddress  string                `json:"dest_address"`
-	Status       storage.Status        `json:"status"`
-	CreatedAt    time.Time             `json:"created_at"`
-	Transactions []storage.Transaction `json:"transactions,omitempty"`
+	ID                 uuid.UUID             `json:"id"`
+	Goal               int64                 `json:"goal"`
+	Collected          int64                 `json:"collected"`
+	CreatorAddress     string                `json:"creator_address"`
+	DestAddress        string                `json:"dest_address"`
+	Status             storage.Status        `json:"status"`
+	CreatedAt          time.Time             `json:"created_at"`
+	Transactions       []storage.Transaction `json:"transactions,omitempty"`
+	ProxyWalletAddress string                `json:"proxy_wallet_address"`
 }
 
 type createTxRequest struct {
-	Amount        string `json:"amount"`
-	SenderAddress string `json:"sender_address"`
-	OpType        string `json:"op_type"`
+	Amount string `json:"amount"`
+	OpType string `json:"op_type"`
 }
