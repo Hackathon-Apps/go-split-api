@@ -43,9 +43,9 @@ type Transaction struct {
 }
 
 type HistoryItem struct {
-	ID          uuid.UUID `json:"id"`
-	Goal        int64     `json:"goal"`
-	DestAddress string    `json:"dest_address"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID                 uuid.UUID `json:"id"`
+	Goal               int64     `json:"goal"`
+	DestinationAddress string    `json:"destination_address"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
 }

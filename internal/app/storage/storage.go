@@ -46,12 +46,12 @@ func (s *Storage) Conn() *gorm.DB {
 
 func (s *Storage) CreateBill(ctx context.Context, goal int64, creator, dest, proxyWallet string) (*Bill, error) {
 	bill := &Bill{
-		ID:             uuid.New(),
-		Goal:           goal,
-		CreatorAddress: creator,
-		DestAddress:    dest,
-		Status:         StatusActive,
-		ProxyWallet:    proxyWallet,
+		ID:                 uuid.New(),
+		Goal:               goal,
+		CreatorAddress:     creator,
+		DestinationAddress: dest,
+		Status:             StatusActive,
+		ProxyWallet:        proxyWallet,
 	}
 
 	if err := s.conn.WithContext(ctx).Create(bill).Error; err != nil {
@@ -130,11 +130,11 @@ func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset i
 	history := make([]HistoryItem, 0, len(bills))
 	for _, bill := range bills {
 		history = append(history, HistoryItem{
-			ID:          bill.ID,
-			Goal:        bill.Goal,
-			DestAddress: bill.DestAddress,
-			Status:      string(bill.Status),
-			CreatedAt:   bill.CreatedAt,
+			ID:                 bill.ID,
+			Goal:               bill.Goal,
+			DestinationAddress: bill.DestinationAddress,
+			Status:             string(bill.Status),
+			CreatedAt:          bill.CreatedAt,
 		})
 	}
 
