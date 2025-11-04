@@ -7,3 +7,6 @@ db_port = 5432
 db_name = "database"
 db_user = "username"
 db_pass = "password"
+
+# ton
+smart_contract_hex = "0xdead"

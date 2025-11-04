@@ -7,7 +7,7 @@ import (
 )
 
 type createBillRequest struct {
-	Goal               string `json:"goal"`
+	Goal               int64  `json:"goal"`
 	DestinationAddress string `json:"destination_address"`
 }
 
@@ -21,6 +21,7 @@ type billResponse struct {
 	CreatedAt          time.Time             `json:"created_at"`
 	Transactions       []storage.Transaction `json:"transactions,omitempty"`
 	ProxyWalletAddress string                `json:"proxy_wallet_address"`
+	StateInitHash      string                `json:"state_init_hash"`
 }
 
 type createTxRequest struct {

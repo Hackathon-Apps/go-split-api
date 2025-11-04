@@ -1,27 +1,55 @@
 package split
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"fmt"
-
-	"github.com/xssnick/tonutils-go/ton"
-	"github.com/xssnick/tonutils-go/ton/wallet"
+	"encoding/base64"
+	"encoding/hex"
+	"github.com/xssnick/tonutils-go/address"
+	"github.com/xssnick/tonutils-go/tlb"
+	"github.com/xssnick/tonutils-go/tvm/cell"
+	"math/rand/v2"
+	"time"
 )
 
-// GenerateTonWalletAddress creates a new TON wallet v4r2 address for collecting funds.
-// It generates a new ed25519 keypair and derives the standard wallet address
-// without performing any network calls.
-func GenerateTonWalletAddress(api *ton.APIClient) (string, error) {
-	// Generate ed25519 keypair
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+type ContractInfo struct {
+	TonAddress    string `json:"ton_address"`
+	StateInitHash string `json:"state_init_hash"`
+}
+
+func GenerateContractInfo(codeHex, receiverAddr string, total int64) (*ContractInfo, error) {
+	codeBOC, err := hex.DecodeString(codeHex)
 	if err != nil {
-		return "", fmt.Errorf("ed25519 keygen failed: %w", err)
+		return nil, err
+	}
+	codeCell, err := cell.FromBOC(codeBOC)
+	if err != nil {
+		return nil, err
 	}
 
-	w, err := wallet.FromPrivateKey(api, priv, wallet.V4R2)
-	if err != nil {
-		return "", fmt.Errorf("wallet init failed: %w", err)
+	rnd := rand.Int64N(time.Now().UnixNano())
+	id := uint64(rnd % 10_000)
+	goal := uint64(total)
+
+	receiver := address.MustParseAddr(receiverAddr)
+
+	dataCell := cell.BeginCell().
+		MustStoreUInt(id, 64).
+		MustStoreUInt(goal, 64).
+		MustStoreAddr(receiver).
+		EndCell()
+
+	stateInit := tlb.StateInit{
+		Code: codeCell,
+		Data: dataCell,
 	}
-	return w.WalletAddress().String(), nil
+	stateInitCell, err := tlb.ToCell(stateInit)
+	if err != nil {
+		return nil, err
+	}
+	bocBytes := stateInitCell.ToBOC()
+	stateInitHash := base64.StdEncoding.EncodeToString(bocBytes)
+
+	return &ContractInfo{
+		TonAddress:    address.NewAddress(0, 0, stateInitCell.Hash()).String(),
+		StateInitHash: stateInitHash,
+	}, nil
 }

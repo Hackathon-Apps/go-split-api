@@ -13,7 +13,7 @@ Content-Type: application/json
 Sender-Address: UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR
 
 {
-  "goal": "100000000000",
+  "goal": 100000000000,
   "destination_address": "UQDQbRJs32yYxOy-ZscoZ9Tlj_pH6D0jeS7a8U5oSkzkicwR"
 }
 

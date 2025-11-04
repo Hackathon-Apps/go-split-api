@@ -65,12 +65,8 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			renderErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
 			return
 		}
-		if strings.TrimSpace(req.Goal) == "" {
-			renderErr(w, http.StatusBadRequest, "goal is required")
-			return
-		}
-		goal, err := parseInt64(req.Goal)
-		if err != nil || goal <= 0 {
+		goal := req.Goal
+		if goal <= 0 {
 			renderErr(w, http.StatusBadRequest, "goal must be positive int64 (nanoton)")
 			return
 		}
@@ -87,13 +83,13 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			return
 		}
 
-		proxyWalletAddr, err := GenerateTonWalletAddress(s.tonApiClient)
+		proxyWalletInfo, err := GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, req.Goal)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, "failed to generate TON address: "+err.Error())
 			return
 		}
 
-		bill, err := s.db.CreateBill(ctx, goal, creator, destinationAddr, proxyWalletAddr)
+		bill, err := s.db.CreateBill(ctx, goal, creator, destinationAddr, proxyWalletInfo.TonAddress, proxyWalletInfo.StateInitHash)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -108,7 +104,8 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			Status:             bill.Status,
 			CreatedAt:          bill.CreatedAt,
 			Transactions:       bill.Transactions,
-			ProxyWalletAddress: proxyWalletAddr,
+			ProxyWalletAddress: bill.ProxyWallet,
+			StateInitHash:      bill.StateInitHash,
 		}
 		w.WriteHeader(http.StatusCreated)
 		renderJSON(w, resp)

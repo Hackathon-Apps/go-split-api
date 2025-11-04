@@ -31,6 +31,7 @@ type Bill struct {
 	Status             Status        `json:"status" gorm:"type:varchar(16);not null"`
 	Transactions       []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
 	ProxyWallet        string        `json:"proxy_wallet" gorm:"not null"`
+	StateInitHash      string        `json:"state_init_hash" gorm:"not null"`
 }
 
 type Transaction struct {
