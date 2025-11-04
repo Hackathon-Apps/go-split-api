@@ -36,7 +36,9 @@ func (s *Server) Start() error {
 
 	s.logger.Info("starting server on port ", s.configuration.BindAddress)
 
-	return http.ListenAndServe(s.configuration.BindAddress, s.router)
+	handler := corsMiddleware(s.router)
+
+	return http.ListenAndServe(s.configuration.BindAddress, handler)
 }
 
 func (s *Server) configureRouter() {
@@ -217,6 +219,19 @@ func (s *Server) handleHistory() http.HandlerFunc {
 			renderJSON(w, historyItems)
 		}
 	}
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Sender-Address")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) walletFromHeader(r *http.Request) (string, error) {
