@@ -1,14 +1,24 @@
 -- +goose Up
 -- +goose StatementBegin
-CREATE TABLE IF NOT EXISTS statuses
+CREATE TABLE IF NOT EXISTS bill_statuses
 (
     name varchar PRIMARY KEY
 );
 
-INSERT INTO statuses(name)
+INSERT INTO bill_statuses(name)
 values ('ACTIVE'),
        ('TIMEOUT'),
        ('DONE');
+
+CREATE TABLE IF NOT EXISTS tx_statuses
+(
+    name varchar PRIMARY KEY
+);
+
+INSERT INTO tx_statuses(name)
+values ('SUCCESS'),
+       ('PENDING'),
+       ('FAILED');
 
 CREATE TABLE IF NOT EXISTS op_type
 (
@@ -29,7 +39,7 @@ CREATE TABLE IF NOT EXISTS bills
     creator_address     varchar   not null,
     destination_address varchar   not null,
     created_at          timestamp not null default now(),
-    status              varchar REFERENCES statuses (name),
+    status              varchar REFERENCES bill_statuses (name),
     proxy_wallet        varchar   not null,
     state_init_hash     varchar   not null
 );
@@ -41,7 +51,8 @@ CREATE TABLE IF NOT EXISTS transactions
     amount         bigint    not null,
     sender_address varchar   not null,
     created_at     timestamp not null default now(),
-    op_type        varchar REFERENCES op_type (name)
+    op_type        varchar REFERENCES op_type (name),
+    status         varchar REFERENCES tx_statuses (name)
 );
 -- +goose StatementEnd
 
@@ -50,5 +61,6 @@ CREATE TABLE IF NOT EXISTS transactions
 DROP TABLE transactions CASCADE;
 DROP TABLE bills CASCADE;
 DROP TABLE op_type CASCADE;
-DROP TABLE statuses CASCADE;
+DROP TABLE bill_statuses CASCADE;
+DROP TABLE tx_statuses CASCADE;
 -- +goose StatementEnd

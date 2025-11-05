@@ -1,4 +1,4 @@
-package split
+package chain
 
 import (
 	"encoding/base64"

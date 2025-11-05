@@ -1,16 +1,27 @@
 package split
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"github.com/Hackathon-Apps/go-split-api/internal/app/chain"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/ton"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	WsURL                       = "wss://tonapi.io/v2/websocket"
+	TonCenterGetTransactionsURL = "https://toncenter.com/api/v2/getTransactions"
 )
 
 type Server struct {
@@ -19,24 +30,36 @@ type Server struct {
 	router        *mux.Router
 	db            *storage.Storage
 	tonApiClient  *ton.APIClient
+
+	ws        *WsHub
+	tonStream *chain.TonStream
 }
 
 func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage, api *ton.APIClient) *Server {
+	ts := chain.NewTonStream(log, WsURL, configuration.TonApiToken)
+
 	return &Server{
 		configuration: configuration,
 		logger:        log,
 		router:        mux.NewRouter(),
 		db:            db,
 		tonApiClient:  api,
+		tonStream:     ts,
+		ws:            NewWSHub(),
 	}
 }
 
 func (s *Server) Start() error {
 	s.configureRouter()
 
-	s.logger.Info("starting server on port ", s.configuration.BindAddress)
-
+	s.logger.WithField("addr", s.configuration.BindAddress).Info("http: starting")
 	handler := corsMiddleware(s.router)
+
+	if err := s.tonStream.Connect(); err != nil {
+		s.logger.WithError(err).Warn("tonstream: connect failed (will retry on first subscribe)")
+	} else {
+		s.logger.Info("tonstream: connected")
+	}
 
 	return http.ListenAndServe(s.configuration.BindAddress, handler)
 }
@@ -50,6 +73,34 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/bills/{id}", s.handleTimeoutBill()).Methods(http.MethodPatch)
 
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
+
+	s.router.HandleFunc("/api/bills/{id}/ws", s.handleBillWS()).Methods(http.MethodGet)
+}
+
+func (s *Server) handleBillWS() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		billID, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		s.logger.WithFields(logrus.Fields{
+			"bill_id": billID.String(),
+			"remote":  r.RemoteAddr,
+		}).Info("ws: subscribe request")
+
+		s.ws.subscribe(billID.String(), w, r)
+
+		ctx := r.Context()
+		bill, err := s.db.GetBillWithTransactions(ctx, billID)
+		if err == nil {
+			s.ws.broadcastBill(billID.String(), bill)
+			s.logger.WithField("bill_id", billID.String()).Debug("ws: initial snapshot sent")
+		} else {
+			s.logger.WithError(err).WithField("bill_id", billID.String()).Warn("ws: failed to fetch initial snapshot")
+		}
+	}
 }
 
 func (s *Server) handleHealthz() http.HandlerFunc {
@@ -83,7 +134,7 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			return
 		}
 
-		proxyWalletInfo, err := GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, req.Goal)
+		proxyWalletInfo, err := chain.GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, req.Goal)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, "failed to generate TON address: "+err.Error())
 			return
@@ -94,6 +145,14 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
+		s.logger.WithFields(logrus.Fields{
+			"bill_id": bill.ID.String(),
+			"creator": creator,
+			"goal":    goal,
+			"dest":    destinationAddr,
+			"proxy":   bill.ProxyWallet,
+		}).Info("bill: created")
 
 		resp := billResponse{
 			ID:                 bill.ID,
@@ -145,6 +204,7 @@ func (s *Server) handleTimeoutBill() http.HandlerFunc {
 			return
 		}
 
+		s.logger.WithField("bill_id", id.String()).Info("bill: marked timeout")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -186,7 +246,22 @@ func (s *Server) handleCreateTransaction() http.HandlerFunc {
 			return
 		}
 
+		s.logger.WithFields(logrus.Fields{
+			"bill_id": billID.String(),
+			"tx_id":   tx.ID.String(),
+			"sender":  sender,
+			"amount":  amount,
+			"op":      op,
+		}).Info("tx: created (PENDING)")
+
+		go s.ensureBillSubscriptionAndWatch(billID, tx.ID)
+
 		w.WriteHeader(http.StatusCreated)
+		updated, _ := s.db.GetTransaction(context.Background(), tx.ID)
+		if updated != nil {
+			renderJSON(w, updated)
+			return
+		}
 		renderJSON(w, tx)
 	}
 }
@@ -218,27 +293,254 @@ func (s *Server) handleHistory() http.HandlerFunc {
 	}
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Sender-Address")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
+func (s *Server) ensureBillSubscriptionAndWatch(billID uuid.UUID, txID uuid.UUID) {
+	bill, err := s.db.GetBillWithTransactions(context.Background(), billID)
+	if err != nil {
+		s.logger.WithError(err).Warn("bill not found for subscribe")
+		return
+	}
+	var pendingTx *storage.Transaction
+	for i := range bill.Transactions {
+		if bill.Transactions[i].ID == txID {
+			pendingTx = &bill.Transactions[i]
+			break
 		}
-		next.ServeHTTP(w, r)
-	})
+	}
+	if pendingTx == nil {
+		s.logger.Warn("pending tx not found")
+		return
+	}
+
+	addr := bill.ProxyWallet
+	if addr == "" {
+		s.logger.Warn("empty proxy wallet address")
+		return
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": billID.String(),
+		"tx_id":   txID.String(),
+		"address": addr,
+	}).Info("tonstream: subscribe start")
+
+	if err := s.tonStream.Subscribe(addr); err != nil {
+		s.logger.WithError(err).Warn("ton stream subscribe failed")
+		return
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": billID.String(),
+		"address": addr,
+	}).Info("tonstream: subscribed")
+
+	go s.listenForTxAndFinalize(bill, *pendingTx, addr)
 }
 
-func (s *Server) walletFromHeader(r *http.Request) (string, error) {
-	c := r.Header.Get("Sender-Address")
-	w := strings.TrimSpace(c)
-	if w == "" {
-		return "", errors.New("empty wallet header")
+func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Transaction, proxyAddr string) {
+	timeout := time.NewTimer(10 * time.Minute)
+	defer timeout.Stop()
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": bill.ID.String(),
+		"tx_id":   pending.ID.String(),
+		"address": proxyAddr,
+	}).Info("watch: started")
+
+	for {
+		select {
+		case ev := <-s.tonStream.Events:
+			if ev.Account != address.MustParseAddr(proxyAddr).StringRaw() {
+				s.logger.WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"tx_hash": ev.TxHash,
+					"account": ev.Account,
+				}).Debug("watch: skip event (other account)")
+				continue
+			}
+			s.logger.WithFields(logrus.Fields{
+				"bill_id": bill.ID.String(),
+				"tx_hash": ev.TxHash,
+				"lt":      ev.LT,
+			}).Info("watch: event received")
+
+			d, err := s.fetchAndMatch(ev.LT, pending, bill)
+			if err != nil {
+				s.logger.WithError(err).WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"tx_hash": ev.TxHash,
+				}).Warn("watch: fetch/match error")
+				continue
+			}
+
+			if d.Matched && !d.Bounced {
+				if err := s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusSuccess); err != nil {
+					s.logger.WithError(err).Warn("update tx status confirmed failed")
+				}
+				if err := s.db.IncreaseBillCollected(context.Background(), bill.ID, d.Amount); err != nil {
+					s.logger.WithError(err).Warn("increase bill collected failed")
+				}
+				s.logger.WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"tx_id":   pending.ID.String(),
+					"lt":      d.LT,
+					"amount":  d.Amount,
+					"from":    d.From,
+					"to":      d.To,
+				}).Info("tx: matched -> SUCCESS")
+			} else if d.Bounced {
+				_ = s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusFailed)
+				s.logger.WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"tx_id":   pending.ID.String(),
+					"lt":      d.LT,
+				}).Info("tx: bounced -> FAILED")
+			} else {
+				s.logger.WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"lt":      d.LT,
+				}).Debug("watch: event not our tx, continue")
+				continue
+			}
+
+			if updated, err := s.db.GetBillWithTransactions(context.Background(), bill.ID); err == nil {
+				s.ws.broadcastBill(bill.ID.String(), updated)
+				s.logger.WithField("bill_id", bill.ID.String()).Debug("ws: broadcast after update")
+			}
+			return
+
+		case <-timeout.C:
+			_ = s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusFailed)
+			if updated, err := s.db.GetBillWithTransactions(context.Background(), bill.ID); err == nil {
+				s.ws.broadcastBill(bill.ID.String(), updated)
+			}
+			s.logger.WithFields(logrus.Fields{
+				"bill_id": bill.ID.String(),
+				"tx_id":   pending.ID.String(),
+			}).Warn("watch: timeout -> FAILED")
+			return
+		}
 	}
-	if len(w) < 36 {
-		return "", errors.New("invalid wallet header")
+}
+
+func (s *Server) pushBillNow(billID string) {
+	if bill, err := s.db.GetBillWithTransactions(context.Background(), uuid.MustParse(billID)); err == nil {
+		s.ws.broadcastBill(billID, bill)
+		s.logger.WithField("bill_id", billID).Debug("ws: pushBillNow broadcast")
 	}
-	return w, nil
+}
+
+func (s *Server) httpClient() *http.Client {
+	return &http.Client{Timeout: 7 * time.Second}
+}
+
+func (s *Server) tonCenterGetTransactions(address string, limit int) (*tcGetTxResp, error) {
+	start := time.Now()
+
+	q := url.Values{}
+	q.Set("address", address)
+	if limit <= 0 {
+		limit = 20
+	}
+	q.Set("limit", strconv.Itoa(limit))
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, TonCenterGetTransactionsURL+"?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if key := strings.TrimSpace(s.configuration.TonCenterApiKey); key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient().Do(req)
+	if err != nil {
+		s.logger.WithError(err).WithFields(logrus.Fields{
+			"address": address,
+			"limit":   limit,
+			"ms":      time.Since(start).Milliseconds(),
+		}).Warn("toncenter: request failed")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var out tcGetTxResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		s.logger.WithError(err).WithFields(logrus.Fields{
+			"status":  resp.StatusCode,
+			"address": address,
+			"limit":   limit,
+			"ms":      time.Since(start).Milliseconds(),
+		}).Warn("toncenter: decode failed")
+		return nil, err
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"status":  resp.StatusCode,
+		"address": address,
+		"limit":   limit,
+		"ok":      out.Ok,
+		"ms":      time.Since(start).Milliseconds(),
+	}).Info("toncenter: getTransactions")
+
+	if !out.Ok {
+		return nil, fmt.Errorf("toncenter getTransactions: ok=false")
+	}
+	return &out, nil
+}
+
+func (s *Server) fetchAndMatch(lt uint64, pending storage.Transaction, bill *storage.Bill) (OnChainTx, error) {
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": bill.ID.String(),
+		"tx_id":   pending.ID.String(),
+		"lt":      lt,
+	}).Info("match: start fetch")
+
+	onChainTx := OnChainTx{
+		LT:      lt,
+		To:      bill.ProxyWallet,
+		Bounced: false,
+	}
+
+	pageLimit := 20
+	res, err := s.tonCenterGetTransactions(bill.ProxyWallet, pageLimit)
+	if err != nil {
+		return onChainTx, err
+	}
+
+	for _, tx := range res.Result {
+		if tx.TransactionID.LT == strconv.FormatUint(lt, 10) {
+			amount, _ := strconv.ParseInt(tx.InMsg.Value, 10, 64)
+
+			onChainTx.Amount = amount
+			onChainTx.From = tx.InMsg.Source
+			onChainTx.To = tx.InMsg.Destination
+			onChainTx.Bounced = tx.InMsg.Bounce || tx.InMsg.Bounced
+
+			onChainFromRaw := address.MustParseAddr(onChainTx.From).StringRaw()
+			pendingFromRaw := address.MustParseAddr(pending.SenderAddress).StringRaw()
+			onChainTx.Matched = strings.EqualFold(onChainTx.To, bill.ProxyWallet) &&
+				strings.EqualFold(onChainFromRaw, pendingFromRaw) &&
+				onChainTx.Amount >= pending.Amount
+
+			s.logger.WithFields(logrus.Fields{
+				"bill_id": bill.ID.String(),
+				"lt":      onChainTx.LT,
+				"from":    onChainTx.From,
+				"to":      onChainTx.To,
+				"amount":  onChainTx.Amount,
+				"bounced": onChainTx.Bounced,
+				"matched": onChainTx.Matched,
+			}).Info("match: fetched")
+
+			return onChainTx, nil
+		}
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": bill.ID.String(),
+		"lt":      lt,
+	}).Warn("match: transaction not found in toncenter window")
+
+	return onChainTx, fmt.Errorf("transaction %d not found for address %s", lt, bill.ProxyWallet)
 }

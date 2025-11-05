@@ -50,3 +50,28 @@ func renderErr(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Sender-Address")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) walletFromHeader(r *http.Request) (string, error) {
+	c := r.Header.Get("Sender-Address")
+	w := strings.TrimSpace(c)
+	if w == "" {
+		return "", errors.New("empty wallet header")
+	}
+	if len(w) < 36 {
+		return "", errors.New("invalid wallet header")
+	}
+	return w, nil
+}

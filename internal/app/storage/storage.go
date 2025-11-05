@@ -9,6 +9,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"time"
 )
 
 type Storage struct {
@@ -18,25 +19,48 @@ type Storage struct {
 }
 
 func Connect(cfg *config.Configuration, log *logrus.Logger) (*Storage, error) {
-	storage := &Storage{
-		configuration: cfg,
-		log:           log,
-	}
+	storage := &Storage{configuration: cfg, log: log}
 
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%d sslmode=disable TimeZone=UTC",
+		"host=%s user=%s password=%s dbname=%s port=%d sslmode=disable TimeZone=UTC connect_timeout=5",
 		cfg.DbHost, cfg.DbUser, cfg.DbPass, cfg.DbName, cfg.DbPort,
 	)
+
 	conn, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
-		log.Error(err.Error())
+		log.WithError(err).Error("gorm open failed")
+		return nil, err // ← важно: не продолжаем
 	}
+
+	sqlDB, err := conn.DB()
+	if err != nil {
+		log.WithError(err).Error("get sql DB failed")
+		return nil, err
+	}
+	// короткие ретраи на случай, если БД ещё поднимается
+	for i := 0; i < 12; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		pingErr := sqlDB.PingContext(ctx)
+		cancel()
+		if pingErr == nil {
+			break
+		}
+		log.WithFields(logrus.Fields{
+			"attempt": i + 1, "host": cfg.DbHost, "port": cfg.DbPort,
+		}).Warn("postgres not ready, retrying…")
+		time.Sleep(time.Second * time.Duration(i+1))
+		if i == 11 {
+			log.WithError(pingErr).Error("postgres ping failed")
+			return nil, pingErr // ← и тут не скрываем ошибку
+		}
+	}
+
 	storage.conn = conn
-
-	log.Info("connected to PostgreSQL [", cfg.DbUser, "] on ", cfg.DbHost, ":", cfg.DbPort)
-
+	log.WithFields(logrus.Fields{
+		"host": cfg.DbHost, "port": cfg.DbPort, "user": cfg.DbUser, "db": cfg.DbName,
+	}).Info("connected to PostgreSQL")
 	return storage, nil
 }
 
@@ -69,24 +93,45 @@ func (s *Storage) AddTransaction(ctx context.Context, billID uuid.UUID, amount i
 		Amount:        amount,
 		SenderAddress: sender,
 		OpType:        op,
+		Status:        StatusPending,
 	}
 
 	if err := s.conn.WithContext(ctx).Create(tx).Error; err != nil {
 		return nil, err
 	}
 
-	if op == OpContribute {
-		if err := s.conn.WithContext(ctx).Model(&Bill{}).
-			Where("id = ?", billID).
-			Update("collected", gorm.Expr("collected + ?", amount)).
-			Error; err != nil {
-			return tx, err
-		}
-	}
-
 	// TODO: add over op_codes handling
 
 	return tx, nil
+}
+
+func (s *Storage) GetTransaction(ctx context.Context, txId uuid.UUID) (*Transaction, error) {
+	var tx Transaction
+	if err := s.conn.WithContext(ctx).
+		First(&tx, "id = ?", txId).Error; err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
+func (s *Storage) UpdateTransaction(ctx context.Context, txId uuid.UUID, status TxStatus) error {
+	var tx Transaction
+	if err := s.conn.WithContext(ctx).
+		First(&tx, "id = ?", txId).Error; err != nil {
+		return err
+	}
+	tx.Status = status
+	return s.conn.WithContext(ctx).Save(&tx).Error
+}
+
+func (s *Storage) IncreaseBillCollected(ctx context.Context, billID uuid.UUID, amount int64) error {
+	var bill Bill
+	if err := s.conn.WithContext(ctx).
+		First(&bill, "id = ?", billID).Error; err != nil {
+		return err
+	}
+	bill.Collected += amount
+	return s.conn.WithContext(ctx).Save(&bill).Error
 }
 
 func (s *Storage) GetBillWithTransactions(ctx context.Context, billID uuid.UUID) (*Bill, error) {

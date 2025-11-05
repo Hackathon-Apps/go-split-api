@@ -5,12 +5,18 @@ import (
 	"time"
 )
 
-type Status string
+type BillStatus string
+
+type TxStatus string
 
 const (
-	StatusActive  Status = "ACTIVE"
-	StatusTimeout Status = "TIMEOUT"
-	StatusDone    Status = "DONE"
+	StatusActive  BillStatus = "ACTIVE"
+	StatusTimeout BillStatus = "TIMEOUT"
+	StatusDone    BillStatus = "DONE"
+
+	StatusPending TxStatus = "PENDING"
+	StatusFailed  TxStatus = "FAILED"
+	StatusSuccess TxStatus = "SUCCESS"
 )
 
 type OpType string
@@ -28,7 +34,7 @@ type Bill struct {
 	CreatorAddress     string        `json:"creator_address" gorm:"not null"`
 	DestinationAddress string        `json:"destination_address" gorm:"not null"`
 	CreatedAt          time.Time     `json:"created_at" gorm:"autoCreateTime"`
-	Status             Status        `json:"status" gorm:"type:varchar(16);not null"`
+	Status             BillStatus    `json:"status" gorm:"type:varchar(16);not null"`
 	Transactions       []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
 	ProxyWallet        string        `json:"proxy_wallet" gorm:"not null"`
 	StateInitHash      string        `json:"state_init_hash" gorm:"not null"`
@@ -41,6 +47,7 @@ type Transaction struct {
 	SenderAddress string    `json:"sender_address" gorm:"not null"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 	OpType        OpType    `json:"op_type" gorm:"type:varchar(32);not null"`
+	Status        TxStatus  `json:"status" gorm:"type:varchar(32);not null"`
 }
 
 type HistoryItem struct {

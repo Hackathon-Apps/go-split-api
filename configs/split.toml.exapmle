@@ -10,3 +10,5 @@ db_pass = "password"
 
 # ton
 smart_contract_hex = "0xdead"
+ton_api_token = "secret-token"
+ton_center_api_key = "secret-key"
