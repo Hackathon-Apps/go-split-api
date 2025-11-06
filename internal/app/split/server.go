@@ -500,6 +500,19 @@ func (s *Server) fetchAndMatch(lt uint64, pending storage.Transaction, bill *sto
 
 			onChainFromRaw := address.MustParseAddr(onChainTx.From).StringRaw()
 			pendingFromRaw := address.MustParseAddr(pending.SenderAddress).StringRaw()
+
+			if onChainTx.To != bill.ProxyWallet {
+				s.logger.Error("proxy_wallet mismatch. OnChainTx.To:", onChainTx.To, "bill.ProxyWallet:", bill.ProxyWallet)
+			}
+
+			if onChainFromRaw != pendingFromRaw {
+				s.logger.Error("from_wallet mismatch. onChainTx.From:", onChainFromRaw, "pendingFromRaw:", pendingFromRaw)
+			}
+
+			if onChainTx.Amount != pending.Amount {
+				s.logger.Error("amount mismatch. onChainTx.Amount:", onChainTx.Amount, "pending.Amount:", pending.Amount)
+			}
+
 			onChainTx.Matched = strings.EqualFold(onChainTx.To, bill.ProxyWallet) &&
 				strings.EqualFold(onChainFromRaw, pendingFromRaw) &&
 				onChainTx.Amount >= pending.Amount
