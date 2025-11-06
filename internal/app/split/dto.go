@@ -19,6 +19,7 @@ type billResponse struct {
 	DestinationAddress string                `json:"destination_address"`
 	Status             storage.BillStatus    `json:"status"`
 	CreatedAt          time.Time             `json:"created_at"`
+	EndedAt            time.Time             `json:"ended_at"`
 	Transactions       []storage.Transaction `json:"transactions,omitempty"`
 	ProxyWalletAddress string                `json:"proxy_wallet_address"`
 	StateInitHash      string                `json:"state_init_hash"`

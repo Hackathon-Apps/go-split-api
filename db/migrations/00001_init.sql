@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS bills
     creator_address     varchar   not null,
     destination_address varchar   not null,
     created_at          timestamp not null default now(),
+    ended_at            timestamp not null default now() + interval '10 minutes',
     status              varchar REFERENCES bill_statuses (name),
     proxy_wallet        varchar   not null,
     state_init_hash     varchar   not null

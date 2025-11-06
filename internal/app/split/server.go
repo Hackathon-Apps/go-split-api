@@ -70,7 +70,6 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/history", s.handleHistory()).Methods(http.MethodGet)
 	s.router.HandleFunc("/api/bills", s.handleCreateBill()).Methods(http.MethodPost)
 	s.router.HandleFunc("/api/bills/{id}", s.handleGetBill()).Methods(http.MethodGet)
-	s.router.HandleFunc("/api/bills/{id}", s.handleTimeoutBill()).Methods(http.MethodPatch)
 
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
 
@@ -93,7 +92,7 @@ func (s *Server) handleBillWS() http.HandlerFunc {
 		s.ws.subscribe(billID.String(), w, r)
 
 		ctx := r.Context()
-		bill, err := s.db.GetBillWithTransactions(ctx, billID)
+		bill, err := s.db.GetBillWithSuccessTransactions(ctx, billID)
 		if err == nil {
 			s.ws.broadcastBill(billID.String(), bill)
 			s.logger.WithField("bill_id", billID.String()).Debug("ws: initial snapshot sent")
@@ -162,6 +161,7 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			DestinationAddress: bill.DestinationAddress,
 			Status:             bill.Status,
 			CreatedAt:          bill.CreatedAt,
+			EndedAt:            bill.EndedAt,
 			Transactions:       bill.Transactions,
 			ProxyWalletAddress: bill.ProxyWallet,
 			StateInitHash:      bill.StateInitHash,
@@ -180,32 +180,13 @@ func (s *Server) handleGetBill() http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		bill, err := s.db.GetBillWithTransactions(ctx, id)
+		bill, err := s.db.GetBillWithSuccessTransactions(ctx, id)
 		if err != nil {
 			renderErr(w, http.StatusNotFound, err.Error())
 			return
 		}
 
 		renderJSON(w, bill)
-	}
-}
-
-func (s *Server) handleTimeoutBill() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := uuidFromVars(mux.Vars(r), "id")
-		if err != nil {
-			renderErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		ctx := r.Context()
-		if err := s.db.MarkBillTimeout(ctx, id); err != nil {
-			renderErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		s.logger.WithField("bill_id", id.String()).Info("bill: marked timeout")
-		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

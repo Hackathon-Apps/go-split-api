@@ -6,6 +6,7 @@ import (
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"github.com/xssnick/tonutils-go/address"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -31,7 +32,7 @@ func Connect(cfg *config.Configuration, log *logrus.Logger) (*Storage, error) {
 	})
 	if err != nil {
 		log.WithError(err).Error("gorm open failed")
-		return nil, err // ← важно: не продолжаем
+		return nil, err
 	}
 
 	sqlDB, err := conn.DB()
@@ -39,7 +40,6 @@ func Connect(cfg *config.Configuration, log *logrus.Logger) (*Storage, error) {
 		log.WithError(err).Error("get sql DB failed")
 		return nil, err
 	}
-	// короткие ретраи на случай, если БД ещё поднимается
 	for i := 0; i < 12; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		pingErr := sqlDB.PingContext(ctx)
@@ -53,7 +53,7 @@ func Connect(cfg *config.Configuration, log *logrus.Logger) (*Storage, error) {
 		time.Sleep(time.Second * time.Duration(i+1))
 		if i == 11 {
 			log.WithError(pingErr).Error("postgres ping failed")
-			return nil, pingErr // ← и тут не скрываем ошибку
+			return nil, pingErr
 		}
 	}
 
@@ -100,8 +100,6 @@ func (s *Storage) AddTransaction(ctx context.Context, billID uuid.UUID, amount i
 		return nil, err
 	}
 
-	// TODO: add over op_codes handling
-
 	return tx, nil
 }
 
@@ -115,13 +113,11 @@ func (s *Storage) GetTransaction(ctx context.Context, txId uuid.UUID) (*Transact
 }
 
 func (s *Storage) UpdateTransaction(ctx context.Context, txId uuid.UUID, status TxStatus) error {
-	var tx Transaction
-	if err := s.conn.WithContext(ctx).
-		First(&tx, "id = ?", txId).Error; err != nil {
-		return err
-	}
-	tx.Status = status
-	return s.conn.WithContext(ctx).Save(&tx).Error
+	return s.conn.WithContext(ctx).
+		Model(&Transaction{}).
+		Where("id = ?", txId).
+		Update("status", status).
+		Error
 }
 
 func (s *Storage) IncreaseBillCollected(ctx context.Context, billID uuid.UUID, amount int64) error {
@@ -131,6 +127,11 @@ func (s *Storage) IncreaseBillCollected(ctx context.Context, billID uuid.UUID, a
 		return err
 	}
 	bill.Collected += amount
+
+	if bill.Collected >= bill.Goal {
+		bill.Status = StatusDone
+	}
+
 	return s.conn.WithContext(ctx).Save(&bill).Error
 }
 
@@ -144,11 +145,23 @@ func (s *Storage) GetBillWithTransactions(ctx context.Context, billID uuid.UUID)
 	return &bill, nil
 }
 
-func (s *Storage) MarkBillTimeout(ctx context.Context, billID uuid.UUID) error {
+func (s *Storage) GetBillWithSuccessTransactions(ctx context.Context, billID uuid.UUID) (*Bill, error) {
+	var bill Bill
+
+	if err := s.conn.WithContext(ctx).
+		Preload("Transactions", "status = ?", StatusSuccess).
+		First(&bill, "id = ?", billID).Error; err != nil {
+		return nil, err
+	}
+
+	return &bill, nil
+}
+
+func (s *Storage) UpdateBillStatus(ctx context.Context, billID uuid.UUID, status BillStatus) error {
 	return s.conn.WithContext(ctx).
 		Model(&Bill{}).
 		Where("id = ?", billID).
-		Update("status", StatusTimeout).
+		Update("status", status).
 		Error
 }
 
@@ -157,7 +170,7 @@ func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset i
 
 	q := s.conn.WithContext(ctx).
 		Model(&Bill{}).
-		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ?", sender).
+		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ? AND t.status = ?", sender, StatusSuccess).
 		Preload("Transactions").
 		Group("bills.id").
 		Order("MAX(t.created_at) DESC")
@@ -173,11 +186,20 @@ func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset i
 		return nil, err
 	}
 
+	senderRaw := address.MustParseAddr(sender).StringRaw()
 	history := make([]HistoryItem, 0, len(bills))
 	for _, bill := range bills {
+		txAmount := int64(0)
+		for _, tx := range bill.Transactions {
+			txSenderRaw := address.MustParseAddr(tx.SenderAddress).StringRaw()
+			if senderRaw == txSenderRaw {
+				txAmount += tx.Amount
+			}
+		}
+
 		history = append(history, HistoryItem{
 			ID:                 bill.ID,
-			Goal:               bill.Goal,
+			Amount:             txAmount,
 			DestinationAddress: bill.DestinationAddress,
 			Status:             string(bill.Status),
 			CreatedAt:          bill.CreatedAt,

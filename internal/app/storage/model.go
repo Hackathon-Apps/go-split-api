@@ -34,6 +34,7 @@ type Bill struct {
 	CreatorAddress     string        `json:"creator_address" gorm:"not null"`
 	DestinationAddress string        `json:"destination_address" gorm:"not null"`
 	CreatedAt          time.Time     `json:"created_at" gorm:"autoCreateTime"`
+	EndedAt            time.Time     `json:"ended_at" gorm:"autoUpdateTime"`
 	Status             BillStatus    `json:"status" gorm:"type:varchar(16);not null"`
 	Transactions       []Transaction `json:"transactions" gorm:"foreignKey:BillID"`
 	ProxyWallet        string        `json:"proxy_wallet" gorm:"not null"`
@@ -52,7 +53,7 @@ type Transaction struct {
 
 type HistoryItem struct {
 	ID                 uuid.UUID `json:"id"`
-	Goal               int64     `json:"goal"`
+	Amount             int64     `json:"amount"`
 	DestinationAddress string    `json:"destination_address"`
 	Status             string    `json:"status"`
 	CreatedAt          time.Time `json:"created_at"`
