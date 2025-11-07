@@ -23,7 +23,7 @@ jobs:
             cd /root/hackaton/go-split-api
             git pull
             make
-            systemctl restart go-split-api-daemon.service
+            systemctl restart split-api-daemon.service
 
 permissions:
   contents: write

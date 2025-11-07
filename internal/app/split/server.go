@@ -4,6 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/Hackathon-Apps/go-split-api/internal/app/chain"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
@@ -12,16 +18,12 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/ton"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
 	WsURL                       = "wss://tonapi.io/v2/websocket"
 	TonCenterGetTransactionsURL = "https://toncenter.com/api/v2/getTransactions"
+	billAutoTimeoutTTL          = 10 * time.Minute
 )
 
 type Server struct {
@@ -51,6 +53,7 @@ func NewServer(configuration *config.Configuration, log *logrus.Logger, db *stor
 
 func (s *Server) Start() error {
 	s.configureRouter()
+	go s.bootstrapBillAutoTimeouts()
 
 	s.logger.WithField("addr", s.configuration.BindAddress).Info("http: starting")
 	handler := corsMiddleware(s.router)
@@ -152,6 +155,8 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			"dest":    destinationAddr,
 			"proxy":   bill.ProxyWallet,
 		}).Info("bill: created")
+
+		s.scheduleBillAutoTimeoutAfter(bill.ID, billAutoTimeoutTTL)
 
 		resp := billResponse{
 			ID:                 bill.ID,
@@ -401,6 +406,86 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 			return
 		}
 	}
+}
+
+func (s *Server) bootstrapBillAutoTimeouts() {
+	ctx := context.Background()
+	bills, err := s.db.ListBillsByStatus(ctx, storage.StatusActive)
+	if err != nil {
+		s.logger.WithError(err).Warn("bill: bootstrap auto-timeout failed")
+		return
+	}
+
+	for _, bill := range bills {
+		delay := time.Until(bill.CreatedAt.Add(billAutoTimeoutTTL))
+		if delay <= 0 {
+			go s.autoTimeoutBill(bill.ID)
+			continue
+		}
+
+		s.scheduleBillAutoTimeoutAfter(bill.ID, delay)
+	}
+}
+
+func (s *Server) scheduleBillAutoTimeoutAfter(billID uuid.UUID, delay time.Duration) {
+	if delay <= 0 {
+		go s.autoTimeoutBill(billID)
+		return
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": billID.String(),
+		"due_in":  delay,
+	}).Debug("bill: auto-timeout timer armed")
+
+	go func(id uuid.UUID, d time.Duration) {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+
+		<-timer.C
+		s.autoTimeoutBill(id)
+	}(billID, delay)
+}
+
+func (s *Server) autoTimeoutBill(billID uuid.UUID) {
+	ctx := context.Background()
+	bill, err := s.db.GetBillWithTransactions(ctx, billID)
+	if err != nil {
+		s.logger.WithError(err).WithField("bill_id", billID.String()).Warn("bill: auto-timeout fetch failed")
+		return
+	}
+
+	if bill.Status == storage.StatusDone || bill.Status == storage.StatusTimeout {
+		s.logger.WithField("bill_id", billID.String()).Debug("bill: auto-timeout skip (already finalized)")
+		return
+	}
+
+	if !bill.CreatedAt.IsZero() && time.Since(bill.CreatedAt) < billAutoTimeoutTTL {
+		delay := billAutoTimeoutTTL - time.Since(bill.CreatedAt)
+		s.logger.WithFields(logrus.Fields{
+			"bill_id":  billID.String(),
+			"retry_in": delay,
+		}).Debug("bill: auto-timeout rescheduled (deadline not reached)")
+		s.scheduleBillAutoTimeoutAfter(billID, delay)
+		return
+	}
+
+	if bill.Collected >= bill.Goal {
+		s.logger.WithField("bill_id", billID.String()).Debug("bill: auto-timeout skip (goal met)")
+		return
+	}
+
+	if err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusTimeout); err != nil {
+		s.logger.WithError(err).WithField("bill_id", bill.ID.String()).Warn("bill: auto-timeout update failed")
+		return
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"bill_id": bill.ID.String(),
+		"status":  bill.Status,
+	}).Info("bill: auto-timeout status applied")
+
+	s.ws.broadcastBill(bill.ID.String(), bill)
 }
 
 func (s *Server) pushBillNow(billID string) {

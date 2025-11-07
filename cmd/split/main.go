@@ -54,6 +54,11 @@ func configureLogger(cfg *config.Configuration) (*logrus.Logger, error) {
 		return nil, err
 	}
 
+	formatter := &logrus.TextFormatter{}
+	formatter.FullTimestamp = true
+	formatter.TimestampFormat = "2006-01-02 15:04:05.000"
+
+	logger.SetFormatter(formatter)
 	logger.SetLevel(level)
 	return logger, nil
 }

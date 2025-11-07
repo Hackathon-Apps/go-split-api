@@ -9,7 +9,6 @@ import (
 	"github.com/xssnick/tonutils-go/address"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"time"
 )
 
@@ -27,9 +26,7 @@ func Connect(cfg *config.Configuration, log *logrus.Logger) (*Storage, error) {
 		cfg.DbHost, cfg.DbUser, cfg.DbPass, cfg.DbName, cfg.DbPort,
 	)
 
-	conn, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
+	conn, err := gorm.Open(postgres.Open(dsn))
 	if err != nil {
 		log.WithError(err).Error("gorm open failed")
 		return nil, err
@@ -161,8 +158,26 @@ func (s *Storage) UpdateBillStatus(ctx context.Context, billID uuid.UUID, status
 	return s.conn.WithContext(ctx).
 		Model(&Bill{}).
 		Where("id = ?", billID).
-		Update("status", status).
+		Updates(map[string]interface{}{
+			"status":   status,
+			"ended_at": time.Now().UTC(),
+		}).
 		Error
+}
+
+func (s *Storage) ListBillsByStatus(ctx context.Context, statuses ...BillStatus) ([]Bill, error) {
+	var bills []Bill
+	if len(statuses) == 0 {
+		return bills, nil
+	}
+
+	if err := s.conn.WithContext(ctx).
+		Where("status IN ?", statuses).
+		Find(&bills).Error; err != nil {
+		return nil, err
+	}
+
+	return bills, nil
 }
 
 func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset int) ([]HistoryItem, error) {
