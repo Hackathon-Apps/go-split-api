@@ -136,7 +136,7 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			return
 		}
 
-		proxyWalletInfo, err := chain.GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, req.Goal)
+		proxyWalletInfo, err := chain.GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, creator, req.Goal)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, "failed to generate TON address: "+err.Error())
 			return

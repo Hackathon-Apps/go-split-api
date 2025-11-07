@@ -15,7 +15,7 @@ type ContractInfo struct {
 	StateInitHash string `json:"state_init_hash"`
 }
 
-func GenerateContractInfo(codeHex, receiverAddr string, total int64) (*ContractInfo, error) {
+func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64) (*ContractInfo, error) {
 	codeBOC, err := hex.DecodeString(codeHex)
 	if err != nil {
 		return nil, err
@@ -30,11 +30,13 @@ func GenerateContractInfo(codeHex, receiverAddr string, total int64) (*ContractI
 	goal := uint64(total)
 
 	receiver := address.MustParseAddr(receiverAddr)
+	creator := address.MustParseAddr(creatorAddr)
 
 	dataCell := cell.BeginCell().
-		MustStoreUInt(id, 64).
-		MustStoreUInt(goal, 64).
+		MustStoreUInt(id, 32).
+		MustStoreCoins(goal).
 		MustStoreAddr(receiver).
+		MustStoreAddr(creator).
 		EndCell()
 
 	stateInit := tlb.StateInit{
