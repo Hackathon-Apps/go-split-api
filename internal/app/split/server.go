@@ -12,9 +12,11 @@ import (
 
 	"github.com/Hackathon-Apps/go-split-api/internal/app/chain"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
+	"github.com/Hackathon-Apps/go-split-api/internal/app/metrics"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/ton"
@@ -32,13 +34,14 @@ type Server struct {
 	router        *mux.Router
 	db            *storage.Storage
 	tonApiClient  *ton.APIClient
+	metrics       *metrics.Metrics
 
 	ws        *WsHub
 	tonStream *chain.TonStream
 }
 
-func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage, api *ton.APIClient) *Server {
-	ts := chain.NewTonStream(log, WsURL, configuration.TonApiToken)
+func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage, api *ton.APIClient, m *metrics.Metrics) *Server {
+	ts := chain.NewTonStream(log, WsURL, configuration.TonApiToken, m)
 
 	return &Server{
 		configuration: configuration,
@@ -46,8 +49,9 @@ func NewServer(configuration *config.Configuration, log *logrus.Logger, db *stor
 		router:        mux.NewRouter(),
 		db:            db,
 		tonApiClient:  api,
+		metrics:       m,
 		tonStream:     ts,
-		ws:            NewWSHub(),
+		ws:            NewWSHub(m),
 	}
 }
 
@@ -57,6 +61,7 @@ func (s *Server) Start() error {
 
 	s.logger.WithField("addr", s.configuration.BindAddress).Info("http: starting")
 	handler := corsMiddleware(s.router)
+	handler = s.metricsMiddleware(handler)
 
 	if err := s.tonStream.Connect(); err != nil {
 		s.logger.WithError(err).Warn("tonstream: connect failed (will retry on first subscribe)")
@@ -77,6 +82,40 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
 
 	s.router.HandleFunc("/api/bills/{id}/ws", s.handleBillWS()).Methods(http.MethodGet)
+	s.router.Handle("/metrics", promhttp.Handler()).Methods(http.MethodGet)
+}
+
+func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
+	if s.metrics == nil {
+		return next
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		mw := &metricsResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(mw, r)
+
+		route := "unknown"
+		if current := mux.CurrentRoute(r); current != nil {
+			if tmpl, err := current.GetPathTemplate(); err == nil {
+				route = tmpl
+			}
+		}
+
+		status := strconv.Itoa(mw.status)
+		s.metrics.HTTPRequests.WithLabelValues(route, r.Method, status).Inc()
+		s.metrics.HTTPDuration.WithLabelValues(route, r.Method).Observe(time.Since(start).Seconds())
+	})
+}
+
+type metricsResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (m *metricsResponseWriter) WriteHeader(code int) {
+	m.status = code
+	m.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) handleBillWS() http.HandlerFunc {
@@ -146,6 +185,9 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if s.metrics != nil {
+			s.metrics.BillsCreated.Inc()
 		}
 
 		s.logger.WithFields(logrus.Fields{
@@ -231,6 +273,9 @@ func (s *Server) handleCreateTransaction() http.HandlerFunc {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if s.metrics != nil {
+			s.metrics.TransactionsCreated.WithLabelValues(string(op)).Inc()
+		}
 
 		s.logger.WithFields(logrus.Fields{
 			"bill_id": billID.String(),
@@ -302,6 +347,8 @@ func (s *Server) ensureBillSubscriptionAndWatch(billID uuid.UUID, txID uuid.UUID
 		s.logger.Warn("empty proxy wallet address")
 		return
 	}
+	rawAddr := address.MustParseAddr(addr).StringRaw()
+	eventCh, cancel := s.tonStream.RegisterListener(rawAddr)
 
 	s.logger.WithFields(logrus.Fields{
 		"bill_id": billID.String(),
@@ -310,6 +357,7 @@ func (s *Server) ensureBillSubscriptionAndWatch(billID uuid.UUID, txID uuid.UUID
 	}).Info("tonstream: subscribe start")
 
 	if err := s.tonStream.Subscribe(addr); err != nil {
+		cancel()
 		s.logger.WithError(err).Warn("ton stream subscribe failed")
 		return
 	}
@@ -319,29 +367,38 @@ func (s *Server) ensureBillSubscriptionAndWatch(billID uuid.UUID, txID uuid.UUID
 		"address": addr,
 	}).Info("tonstream: subscribed")
 
-	go s.listenForTxAndFinalize(bill, *pendingTx, addr)
+	go s.listenForTxAndFinalize(bill, *pendingTx, addr, eventCh, cancel)
 }
 
-func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Transaction, proxyAddr string) {
+func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Transaction, proxyAddr string, eventCh <-chan chain.TonEvent, cancel func()) {
 	timeout := time.NewTimer(10 * time.Minute)
 	defer timeout.Stop()
+	resultLabel := "unknown"
+	start := time.Now()
+	if s.metrics != nil {
+		s.metrics.TxWatchersActive.Inc()
+		defer func() {
+			s.metrics.TxWatchersActive.Dec()
+			s.metrics.TxWatcherDuration.WithLabelValues(resultLabel).Observe(time.Since(start).Seconds())
+		}()
+	}
 
 	s.logger.WithFields(logrus.Fields{
 		"bill_id": bill.ID.String(),
 		"tx_id":   pending.ID.String(),
 		"address": proxyAddr,
 	}).Info("watch: started")
+	defer cancel()
 
 	for {
 		select {
-		case ev := <-s.tonStream.Events:
-			if ev.Account != address.MustParseAddr(proxyAddr).StringRaw() {
+		case ev, ok := <-eventCh:
+			if !ok {
 				s.logger.WithFields(logrus.Fields{
 					"bill_id": bill.ID.String(),
-					"tx_hash": ev.TxHash,
-					"account": ev.Account,
-				}).Debug("watch: skip event (other account)")
-				continue
+					"tx_id":   pending.ID.String(),
+				}).Warn("watch: listener closed")
+				return
 			}
 			s.logger.WithFields(logrus.Fields{
 				"bill_id": bill.ID.String(),
@@ -365,6 +422,10 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 				if err := s.db.IncreaseBillCollected(context.Background(), bill.ID, d.Amount); err != nil {
 					s.logger.WithError(err).Warn("increase bill collected failed")
 				}
+				resultLabel = "success"
+				if s.metrics != nil {
+					s.metrics.TransactionsFinalized.WithLabelValues("success").Inc()
+				}
 				s.logger.WithFields(logrus.Fields{
 					"bill_id": bill.ID.String(),
 					"tx_id":   pending.ID.String(),
@@ -375,6 +436,10 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 				}).Info("tx: matched -> SUCCESS")
 			} else if d.Bounced {
 				_ = s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusFailed)
+				resultLabel = "bounced"
+				if s.metrics != nil {
+					s.metrics.TransactionsFinalized.WithLabelValues("bounced").Inc()
+				}
 				s.logger.WithFields(logrus.Fields{
 					"bill_id": bill.ID.String(),
 					"tx_id":   pending.ID.String(),
@@ -398,6 +463,10 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 			_ = s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusFailed)
 			if updated, err := s.db.GetBillWithTransactions(context.Background(), bill.ID); err == nil {
 				s.ws.broadcastBill(bill.ID.String(), updated)
+			}
+			resultLabel = "timeout"
+			if s.metrics != nil {
+				s.metrics.TransactionsFinalized.WithLabelValues("timeout").Inc()
 			}
 			s.logger.WithFields(logrus.Fields{
 				"bill_id": bill.ID.String(),
@@ -449,6 +518,13 @@ func (s *Server) scheduleBillAutoTimeoutAfter(billID uuid.UUID, delay time.Durat
 
 func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 	ctx := context.Background()
+	result := "error"
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.BillAutoTimeouts.WithLabelValues(result).Inc()
+		}
+	}()
+
 	bill, err := s.db.GetBillWithTransactions(ctx, billID)
 	if err != nil {
 		s.logger.WithError(err).WithField("bill_id", billID.String()).Warn("bill: auto-timeout fetch failed")
@@ -456,6 +532,7 @@ func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 	}
 
 	if bill.Status == storage.StatusDone || bill.Status == storage.StatusTimeout {
+		result = "skipped"
 		s.logger.WithField("bill_id", billID.String()).Debug("bill: auto-timeout skip (already finalized)")
 		return
 	}
@@ -466,11 +543,13 @@ func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 			"bill_id":  billID.String(),
 			"retry_in": delay,
 		}).Debug("bill: auto-timeout rescheduled (deadline not reached)")
+		result = "rescheduled"
 		s.scheduleBillAutoTimeoutAfter(billID, delay)
 		return
 	}
 
 	if bill.Collected >= bill.Goal {
+		result = "skipped"
 		s.logger.WithField("bill_id", billID.String()).Debug("bill: auto-timeout skip (goal met)")
 		return
 	}
@@ -484,6 +563,7 @@ func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 		"bill_id": bill.ID.String(),
 		"status":  bill.Status,
 	}).Info("bill: auto-timeout status applied")
+	result = "applied"
 
 	s.ws.broadcastBill(bill.ID.String(), bill)
 }
@@ -501,6 +581,13 @@ func (s *Server) httpClient() *http.Client {
 
 func (s *Server) tonCenterGetTransactions(address string, limit int) (*tcGetTxResp, error) {
 	start := time.Now()
+	resultLabel := "error"
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.TonCenterRequests.WithLabelValues(resultLabel).Inc()
+			s.metrics.TonCenterRequestDuration.WithLabelValues(resultLabel).Observe(time.Since(start).Seconds())
+		}
+	}()
 
 	q := url.Values{}
 	q.Set("address", address)
@@ -552,6 +639,7 @@ func (s *Server) tonCenterGetTransactions(address string, limit int) (*tcGetTxRe
 	if !out.Ok {
 		return nil, fmt.Errorf("toncenter getTransactions: ok=false")
 	}
+	resultLabel = "success"
 	return &out, nil
 }
 

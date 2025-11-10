@@ -2,14 +2,16 @@ package main
 
 import (
 	"flag"
+	"log"
+
 	"github.com/BurntSushi/toml"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
+	"github.com/Hackathon-Apps/go-split-api/internal/app/metrics"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/split"
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
 	"github.com/sirupsen/logrus"
 	"github.com/xssnick/tonutils-go/liteclient"
 	"github.com/xssnick/tonutils-go/ton"
-	"log"
 )
 
 var (
@@ -40,8 +42,9 @@ func main() {
 
 	pool := liteclient.NewConnectionPool()
 	api := ton.NewAPIClient(pool)
+	metricsCollector := metrics.New(nil)
 
-	server := split.NewServer(configuration, logger, db, api)
+	server := split.NewServer(configuration, logger, db, api, metricsCollector)
 	if err := server.Start(); err != nil {
 		log.Fatal(err)
 	}

@@ -2,19 +2,22 @@ package split
 
 import (
 	"encoding/json"
-	"github.com/gorilla/websocket"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/Hackathon-Apps/go-split-api/internal/app/metrics"
+	"github.com/gorilla/websocket"
 )
 
 type WsHub struct {
-	mu    sync.RWMutex
-	conns map[string]map[*websocket.Conn]struct{} // billID -> set of conns
-	upgr  websocket.Upgrader
+	mu      sync.RWMutex
+	conns   map[string]map[*websocket.Conn]struct{} // billID -> set of conns
+	upgr    websocket.Upgrader
+	metrics *metrics.Metrics
 }
 
-func NewWSHub() *WsHub {
+func NewWSHub(m *metrics.Metrics) *WsHub {
 	return &WsHub{
 		conns: make(map[string]map[*websocket.Conn]struct{}),
 		upgr: websocket.Upgrader{
@@ -22,6 +25,7 @@ func NewWSHub() *WsHub {
 			WriteBufferSize: 1024,
 			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
+		metrics: m,
 	}
 }
 
@@ -36,6 +40,9 @@ func (h *WsHub) subscribe(billID string, w http.ResponseWriter, r *http.Request)
 	}
 	h.conns[billID][conn] = struct{}{}
 	h.mu.Unlock()
+	if h.metrics != nil {
+		h.metrics.WsConnections.Inc()
+	}
 
 	go func() {
 		defer func() {
@@ -45,6 +52,9 @@ func (h *WsHub) subscribe(billID string, w http.ResponseWriter, r *http.Request)
 				delete(h.conns, billID)
 			}
 			h.mu.Unlock()
+			if h.metrics != nil {
+				h.metrics.WsConnections.Dec()
+			}
 			conn.Close()
 		}()
 		conn.SetReadLimit(512)
