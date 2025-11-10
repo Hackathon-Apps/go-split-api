@@ -3,11 +3,12 @@ package chain
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"math/rand/v2"
+	"time"
+
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/tvm/cell"
-	"math/rand/v2"
-	"time"
 )
 
 type ContractInfo struct {
@@ -32,11 +33,23 @@ func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64
 	receiver := address.MustParseAddr(receiverAddr)
 	creator := address.MustParseAddr(creatorAddr)
 
+	/*
+			beginCell()
+		        .storeUint(config.id, 32)
+		        .storeCoins(config.goal.grams)
+		        .storeAddress(config.recieverAddress)
+		        .storeAddress(config.creatorAddress)
+		        .storeDict(Dictionary.empty())
+		        .storeUint(0, 8)
+		        .endCell();
+	*/
 	dataCell := cell.BeginCell().
 		MustStoreUInt(id, 32).
 		MustStoreCoins(goal).
 		MustStoreAddr(receiver).
 		MustStoreAddr(creator).
+		MustStoreDict(&cell.Dictionary{}).
+		MustStoreUInt(0, 8).
 		EndCell()
 
 	stateInit := tlb.StateInit{
