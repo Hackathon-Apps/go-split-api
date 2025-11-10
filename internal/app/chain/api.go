@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Hackathon-Apps/go-split-api/internal/app/metrics"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 	"github.com/xssnick/tonutils-go/address"
@@ -23,7 +22,6 @@ type TonStream struct {
 	mu        sync.Mutex
 	subs      map[string]struct{}
 	stopped   chan struct{}
-	metrics   *metrics.Metrics
 	listeners map[string]map[chan TonEvent]struct{}
 }
 
@@ -33,14 +31,13 @@ type TonEvent struct {
 	LT      uint64 `json:"lt"`
 }
 
-func NewTonStream(log *logrus.Logger, apiURL, token string, m *metrics.Metrics) *TonStream {
+func NewTonStream(log *logrus.Logger, apiURL, token string) *TonStream {
 	return &TonStream{
 		log:       log,
 		apiURL:    apiURL,
 		token:     token,
 		subs:      make(map[string]struct{}),
 		stopped:   make(chan struct{}),
-		metrics:   m,
 		listeners: make(map[string]map[chan TonEvent]struct{}),
 	}
 }
@@ -63,20 +60,12 @@ func (t *TonStream) Connect() error {
 		return err
 	}
 	t.conn = c
-	if t.metrics != nil {
-		t.metrics.TonStreamConnections.Inc()
-		t.metrics.TonStreamConnected.Set(1)
-	}
 
 	go func() {
 		defer close(t.stopped)
 		for {
 			_, data, err := t.conn.ReadMessage()
 			if err != nil {
-				if t.metrics != nil {
-					t.metrics.TonStreamEvents.WithLabelValues("read_error").Inc()
-					t.metrics.TonStreamConnected.Set(0)
-				}
 				t.log.WithError(err).Warn("chain stream read error")
 				_ = t.close()
 				return
@@ -87,9 +76,6 @@ func (t *TonStream) Connect() error {
 				Params json.RawMessage `json:"params"`
 			}
 			if err := json.Unmarshal(data, &msg); err != nil {
-				if t.metrics != nil {
-					t.metrics.TonStreamEvents.WithLabelValues("frame_decode_error").Inc()
-				}
 				t.log.WithError(err).Warn("ws: unmarshal frame failed")
 				continue
 			}
@@ -104,9 +90,6 @@ func (t *TonStream) Connect() error {
 				LT        json.Number `json:"lt"`
 			}
 			if err := json.Unmarshal(msg.Params, &p); err != nil {
-				if t.metrics != nil {
-					t.metrics.TonStreamEvents.WithLabelValues("event_decode_error").Inc()
-				}
 				t.log.WithError(err).Warn("ws: unmarshal account_transaction params failed")
 				continue
 			}
@@ -133,9 +116,6 @@ func (t *TonStream) close() error {
 	if t.conn != nil {
 		_ = t.conn.Close()
 		t.conn = nil
-		if t.metrics != nil {
-			t.metrics.TonStreamConnected.Set(0)
-		}
 	}
 	return nil
 }
@@ -159,9 +139,6 @@ func (t *TonStream) ensure() error {
 
 func (t *TonStream) Subscribe(addresses ...string) error {
 	if err := t.ensure(); err != nil {
-		if t.metrics != nil {
-			t.metrics.TonStreamSubscribes.WithLabelValues("error").Inc()
-		}
 		return err
 	}
 	t.mu.Lock()
@@ -174,16 +151,10 @@ func (t *TonStream) Subscribe(addresses ...string) error {
 		"params":  addresses,
 	}
 	if err := t.conn.WriteJSON(req); err != nil {
-		if t.metrics != nil {
-			t.metrics.TonStreamSubscribes.WithLabelValues("error").Inc()
-		}
 		return err
 	}
 	for _, a := range addresses {
 		t.subs[a] = struct{}{}
-	}
-	if t.metrics != nil {
-		t.metrics.TonStreamSubscribes.WithLabelValues("success").Inc()
 	}
 	return nil
 }
@@ -228,7 +199,6 @@ func (t *TonStream) dispatchEvent(ev TonEvent) {
 	}
 	delivered := 0
 	dropped := 0
-	noListeners := len(listenersMap) == 0
 	t.mu.Unlock()
 
 	for _, ch := range targets {
@@ -240,19 +210,7 @@ func (t *TonStream) dispatchEvent(ev TonEvent) {
 		}
 	}
 
-	if t.metrics == nil {
-		return
 	}
-	if delivered > 0 {
-		t.metrics.TonStreamEvents.WithLabelValues("delivered").Add(float64(delivered))
-	}
-	if dropped > 0 {
-		t.metrics.TonStreamEvents.WithLabelValues("dropped").Add(float64(dropped))
-	}
-	if noListeners && delivered == 0 && dropped == 0 {
-		t.metrics.TonStreamEvents.WithLabelValues("no_listener").Inc()
-	}
-}
 
 func normalizeAddress(addr string) string {
 	addr = strings.TrimSpace(addr)
