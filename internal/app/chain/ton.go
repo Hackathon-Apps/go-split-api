@@ -39,7 +39,6 @@ func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64
 		MustStoreAddr(receiver).
 		MustStoreAddr(creator).
 		MustStoreDict(&cell.Dictionary{}).
-		MustStoreUInt(0, 8).
 		EndCell()
 
 	stateInit := tlb.StateInit{
