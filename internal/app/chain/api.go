@@ -210,7 +210,7 @@ func (t *TonStream) dispatchEvent(ev TonEvent) {
 		}
 	}
 
-	}
+}
 
 func normalizeAddress(addr string) string {
 	addr = strings.TrimSpace(addr)

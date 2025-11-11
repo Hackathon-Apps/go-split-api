@@ -76,7 +76,7 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/history", s.handleHistory()).Methods(http.MethodGet)
 	s.router.HandleFunc("/api/bills", s.handleCreateBill()).Methods(http.MethodPost)
 	s.router.HandleFunc("/api/bills/{id}", s.handleGetBill()).Methods(http.MethodGet)
-	s.router.HandleFunc("/api/bills/{id}/refund", s.handleRefundBill()).Methods(http.MethodPatch)
+	s.router.HandleFunc("/api/bills/{id}/refund", s.handleRefundBill()).Methods(http.MethodPost)
 
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
 
@@ -224,11 +224,11 @@ func (s *Server) handleRefundBill() http.HandlerFunc {
 			return
 		}
 
-		err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusRefunded)
-		if err != nil {
+		if err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusRefunded); err != nil {
 			renderErr(w, http.StatusNotFound, err.Error())
 			return
 		}
+		s.pushBillNow(bill.ID)
 
 		renderJSON(w, "ok")
 	}
@@ -526,13 +526,15 @@ func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 		"status":  bill.Status,
 	}).Info("bill: auto-timeout status applied")
 
-	s.ws.broadcastBill(bill.ID.String(), bill)
+	s.pushBillNow(bill.ID)
 }
 
-func (s *Server) pushBillNow(billID string) {
-	if bill, err := s.db.GetBillWithTransactions(context.Background(), uuid.MustParse(billID)); err == nil {
-		s.ws.broadcastBill(billID, bill)
-		s.logger.WithField("bill_id", billID).Debug("ws: pushBillNow broadcast")
+func (s *Server) pushBillNow(billID uuid.UUID) {
+	if bill, err := s.db.GetBillWithTransactions(context.Background(), billID); err == nil {
+		s.ws.broadcastBill(billID.String(), bill)
+		s.logger.WithField("bill_id", billID.String()).Debug("ws: pushBillNow broadcast")
+	} else {
+		s.logger.WithError(err).WithField("bill_id", billID.String()).Warn("ws: pushBillNow fetch failed")
 	}
 }
 
