@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS bill_statuses
 INSERT INTO bill_statuses(name)
 values ('ACTIVE'),
        ('TIMEOUT'),
-       ('DONE');
+       ('DONE'),
+       ('REFUNDED');
 
 CREATE TABLE IF NOT EXISTS tx_statuses
 (
