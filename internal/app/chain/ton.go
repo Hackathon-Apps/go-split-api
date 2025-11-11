@@ -16,7 +16,7 @@ type ContractInfo struct {
 	StateInitHash string `json:"state_init_hash"`
 }
 
-func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64) (*ContractInfo, error) {
+func GenerateContractInfo(codeHex, receiverAddr, creatorAddr, feeCollectorAddr string, total int64) (*ContractInfo, error) {
 	codeBOC, err := hex.DecodeString(codeHex)
 	if err != nil {
 		return nil, err
@@ -32,12 +32,14 @@ func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64
 
 	receiver := address.MustParseAddr(receiverAddr)
 	creator := address.MustParseAddr(creatorAddr)
+	feeCollector := address.MustParseAddr(feeCollectorAddr)
 
 	dataCell := cell.BeginCell().
 		MustStoreUInt(id, 32).
 		MustStoreCoins(goal).
 		MustStoreAddr(receiver).
 		MustStoreAddr(creator).
+		MustStoreAddr(feeCollector).
 		MustStoreDict(&cell.Dictionary{}).
 		EndCell()
 

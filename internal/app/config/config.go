@@ -10,9 +10,10 @@ type Configuration struct {
 	DbUser string `toml:"db_user"`
 	DbPass string `toml:"db_pass"`
 	// chain
-	SmartContractHex string `toml:"smart_contract_hex"`
-	TonApiToken      string `toml:"ton_api_token"`
-	TonCenterApiKey  string `toml:"ton_center_api_key"`
+	SmartContractHex    string `toml:"smart_contract_hex"`
+	TonApiToken         string `toml:"ton_api_token"`
+	TonCenterApiKey     string `toml:"ton_center_api_key"`
+	FeeCollectorAddress string `toml:"fee_collector_address"`
 }
 
 func NewConfiguration() *Configuration {

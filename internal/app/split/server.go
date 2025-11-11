@@ -26,6 +26,8 @@ const (
 	billAutoTimeoutTTL          = 10 * time.Minute
 )
 
+var feeCollectorAddr string
+
 type Server struct {
 	configuration *config.Configuration
 	logger        *logrus.Logger
@@ -39,6 +41,7 @@ type Server struct {
 
 func NewServer(configuration *config.Configuration, log *logrus.Logger, db *storage.Storage, api *ton.APIClient) *Server {
 	ts := chain.NewTonStream(log, WsURL, configuration.TonApiToken)
+	feeCollectorAddr = configuration.FeeCollectorAddress
 
 	return &Server{
 		configuration: configuration,
@@ -136,7 +139,7 @@ func (s *Server) handleCreateBill() http.HandlerFunc {
 			return
 		}
 
-		proxyWalletInfo, err := chain.GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, creator, req.Goal)
+		proxyWalletInfo, err := chain.GenerateContractInfo(s.configuration.SmartContractHex, destinationAddr, creator, feeCollectorAddr, req.Goal)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, "failed to generate TON address: "+err.Error())
 			return
