@@ -11,9 +11,10 @@ type BillStatus string
 type TxStatus string
 
 const (
-	StatusActive  BillStatus = "ACTIVE"
-	StatusTimeout BillStatus = "TIMEOUT"
-	StatusDone    BillStatus = "DONE"
+	StatusActive   BillStatus = "ACTIVE"
+	StatusTimeout  BillStatus = "TIMEOUT"
+	StatusDone     BillStatus = "DONE"
+	StatusRefunded BillStatus = "REFUNDED"
 
 	StatusPending TxStatus = "PENDING"
 	StatusFailed  TxStatus = "FAILED"

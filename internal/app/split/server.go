@@ -76,6 +76,7 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/history", s.handleHistory()).Methods(http.MethodGet)
 	s.router.HandleFunc("/api/bills", s.handleCreateBill()).Methods(http.MethodPost)
 	s.router.HandleFunc("/api/bills/{id}", s.handleGetBill()).Methods(http.MethodGet)
+	s.router.HandleFunc("/api/bills/{id}/refund", s.handleRefundBill()).Methods(http.MethodPatch)
 
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
 
@@ -194,6 +195,42 @@ func (s *Server) handleGetBill() http.HandlerFunc {
 		}
 
 		renderJSON(w, bill)
+	}
+}
+
+func (s *Server) handleRefundBill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		creator, err := s.walletFromHeader(r)
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx := r.Context()
+		bill, err := s.db.GetBillWithSuccessTransactions(ctx, id)
+		if err != nil {
+			renderErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		if bill.CreatorAddress != creator {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusRefunded)
+		if err != nil {
+			renderErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		renderJSON(w, "ok")
 	}
 }
 
