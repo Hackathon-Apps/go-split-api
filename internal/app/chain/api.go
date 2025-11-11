@@ -176,9 +176,7 @@ func (t *TonStream) RegisterListener(addr string) (<-chan TonEvent, func()) {
 			t.mu.Lock()
 			defer t.mu.Unlock()
 			if listeners, ok := t.listeners[key]; ok {
-				if _, exists := listeners[ch]; exists {
-					delete(listeners, ch)
-				}
+				delete(listeners, ch)
 				if len(listeners) == 0 {
 					delete(t.listeners, key)
 				}

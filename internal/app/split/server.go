@@ -220,7 +220,7 @@ func (s *Server) handleRefundBill() http.HandlerFunc {
 		}
 
 		if bill.CreatorAddress != creator {
-			renderErr(w, http.StatusBadRequest, err.Error())
+			renderErr(w, http.StatusBadRequest, "Refund error: creator addresses mismatch")
 			return
 		}
 
@@ -228,7 +228,7 @@ func (s *Server) handleRefundBill() http.HandlerFunc {
 			renderErr(w, http.StatusNotFound, err.Error())
 			return
 		}
-		s.pushBillNow(bill.ID)
+		s.ws.broadcastBill(bill.ID.String(), bill)
 
 		renderJSON(w, "ok")
 	}
@@ -526,16 +526,7 @@ func (s *Server) autoTimeoutBill(billID uuid.UUID) {
 		"status":  bill.Status,
 	}).Info("bill: auto-timeout status applied")
 
-	s.pushBillNow(bill.ID)
-}
-
-func (s *Server) pushBillNow(billID uuid.UUID) {
-	if bill, err := s.db.GetBillWithTransactions(context.Background(), billID); err == nil {
-		s.ws.broadcastBill(billID.String(), bill)
-		s.logger.WithField("bill_id", billID.String()).Debug("ws: pushBillNow broadcast")
-	} else {
-		s.logger.WithError(err).WithField("bill_id", billID.String()).Warn("ws: pushBillNow fetch failed")
-	}
+	s.ws.broadcastBill(billID.String(), bill)
 }
 
 func (s *Server) httpClient() *http.Client {
