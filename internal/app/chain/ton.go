@@ -33,16 +33,6 @@ func GenerateContractInfo(codeHex, receiverAddr, creatorAddr string, total int64
 	receiver := address.MustParseAddr(receiverAddr)
 	creator := address.MustParseAddr(creatorAddr)
 
-	/*
-			beginCell()
-		        .storeUint(config.id, 32)
-		        .storeCoins(config.goal.grams)
-		        .storeAddress(config.recieverAddress)
-		        .storeAddress(config.creatorAddress)
-		        .storeDict(Dictionary.empty())
-		        .storeUint(0, 8)
-		        .endCell();
-	*/
 	dataCell := cell.BeginCell().
 		MustStoreUInt(id, 32).
 		MustStoreCoins(goal).
