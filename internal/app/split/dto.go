@@ -1,9 +1,10 @@
 package split
 
 import (
+	"time"
+
 	"github.com/Hackathon-Apps/go-split-api/internal/app/storage"
 	"github.com/google/uuid"
-	"time"
 )
 
 type createBillRequest struct {
@@ -23,6 +24,13 @@ type billResponse struct {
 	Transactions       []storage.Transaction `json:"transactions,omitempty"`
 	ProxyWalletAddress string                `json:"proxy_wallet_address"`
 	StateInitHash      string                `json:"state_init_hash"`
+}
+
+type historyItemsPage struct {
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
+	Total    int                   `json:"total"`
+	Data     []storage.HistoryItem `json:"data"`
 }
 
 type createTxRequest struct {

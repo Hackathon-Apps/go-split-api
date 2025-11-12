@@ -18,15 +18,16 @@ type Configuration struct {
 
 func NewConfiguration() *Configuration {
 	return &Configuration{
-		BindAddress:      ":8081",
-		LogLevel:         "debug",
-		DbHost:           "localhost",
-		DbPort:           5432,
-		DbName:           "database",
-		DbUser:           "username",
-		DbPass:           "password",
-		SmartContractHex: "0xdead",
-		TonApiToken:      "token",
-		TonCenterApiKey:  "api_key",
+		BindAddress:         ":8081",
+		LogLevel:            "debug",
+		DbHost:              "localhost",
+		DbPort:              5432,
+		DbName:              "database",
+		DbUser:              "username",
+		DbPass:              "password",
+		SmartContractHex:    "0xdead",
+		TonApiToken:         "token",
+		TonCenterApiKey:     "api_key",
+		FeeCollectorAddress: "UQ...rW",
 	}
 }

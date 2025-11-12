@@ -180,25 +180,38 @@ func (s *Storage) ListBillsByStatus(ctx context.Context, statuses ...BillStatus)
 	return bills, nil
 }
 
-func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset int) ([]HistoryItem, error) {
+func (s *Storage) GetHistory(ctx context.Context, sender string, page, pageSize int) ([]HistoryItem, int64, error) {
 	var bills []Bill
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	offset := (page - 1) * pageSize
+
+	var total int64
+	countQ := s.conn.WithContext(ctx).
+		Model(&Bill{}).
+		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ? AND t.status = ?", sender, StatusSuccess).
+		Distinct("bills.id").
+		Count(&total)
+	if countQ.Error != nil {
+		return nil, 0, countQ.Error
+	}
 
 	q := s.conn.WithContext(ctx).
 		Model(&Bill{}).
 		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ? AND t.status = ?", sender, StatusSuccess).
 		Preload("Transactions").
 		Group("bills.id").
-		Order("MAX(t.created_at) DESC")
-
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if offset > 0 {
-		q = q.Offset(offset)
-	}
+		Order("MAX(t.created_at) DESC").
+		Limit(pageSize).
+		Offset(offset)
 
 	if err := q.Find(&bills).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	senderRaw := address.MustParseAddr(sender).StringRaw()
@@ -221,5 +234,5 @@ func (s *Storage) GetHistory(ctx context.Context, sender string, limit, offset i
 		})
 	}
 
-	return history, nil
+	return history, total, nil
 }
