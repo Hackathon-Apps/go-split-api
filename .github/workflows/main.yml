@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout 🛎️
-        uses: actions/checkout@v2.3.1
+        uses: actions/checkout@v5
       - name: Install dependencies (if needed)
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -34,6 +34,7 @@ jobs:
       - name: Build and Deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
+          go-version: '1.24.3'
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
