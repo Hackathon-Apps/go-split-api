@@ -378,6 +378,9 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 	timeout := time.NewTimer(10 * time.Minute)
 	defer timeout.Stop()
 
+	pollTicker := time.NewTicker(3 * time.Second)
+	defer pollTicker.Stop()
+
 	s.logger.WithFields(logrus.Fields{
 		"bill_id": bill.ID.String(),
 		"tx_id":   pending.ID.String(),
@@ -385,16 +388,30 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 	}).Info("watch: started")
 	defer cancel()
 
+	rawAddr := address.MustParseAddr(proxyAddr).StringRaw()
+	curEvCh := eventCh
+	curCancel := cancel
+
 	for {
 		select {
-		case ev, ok := <-eventCh:
+		case ev, ok := <-curEvCh:
 			if !ok {
 				s.logger.WithFields(logrus.Fields{
 					"bill_id": bill.ID.String(),
 					"tx_id":   pending.ID.String(),
-				}).Warn("watch: listener closed")
-				return
+				}).Warn("watch: listener closed (stream reconnect in progress?)")
+
+				// перерегистрируем listener и продолжаем ждать
+				if curCancel != nil {
+					curCancel()
+				}
+				newCh, newCancel := s.tonStream.RegisterListener(rawAddr)
+				curEvCh = newCh
+				curCancel = newCancel
+				_ = s.tonStream.Subscribe(rawAddr) // на случай, если подписки ещё нет после реконнекта
+				continue
 			}
+
 			s.logger.WithFields(logrus.Fields{
 				"bill_id": bill.ID.String(),
 				"tx_hash": ev.TxHash,
@@ -445,6 +462,28 @@ func (s *Server) listenForTxAndFinalize(bill *storage.Bill, pending storage.Tran
 				s.logger.WithField("bill_id", bill.ID.String()).Debug("ws: broadcast after update")
 			}
 			return
+
+		case <-pollTicker.C:
+			d, err := s.fetchAndMatchAny(pending, bill)
+			if err == nil && d.Matched && !d.Bounced {
+				if err := s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusSuccess); err != nil {
+					s.logger.WithError(err).Warn("update tx status confirmed failed (polling)")
+				}
+				if err := s.db.IncreaseBillCollected(context.Background(), bill.ID, d.Amount); err != nil {
+					s.logger.WithError(err).Warn("increase bill collected failed (polling)")
+				}
+				s.logger.WithFields(logrus.Fields{
+					"bill_id": bill.ID.String(),
+					"tx_id":   pending.ID.String(),
+					"lt":      d.LT,
+					"amount":  d.Amount,
+				}).Info("tx: matched via polling -> SUCCESS")
+
+				if updated, err := s.db.GetBillWithTransactions(context.Background(), bill.ID); err == nil {
+					s.ws.broadcastBill(bill.ID.String(), updated)
+				}
+				return
+			}
 
 		case <-timeout.C:
 			_ = s.db.UpdateTransaction(context.Background(), pending.ID, storage.StatusFailed)
@@ -666,4 +705,45 @@ func (s *Server) fetchAndMatch(lt uint64, pending storage.Transaction, bill *sto
 	}).Warn("match: transaction not found in toncenter window")
 
 	return onChainTx, fmt.Errorf("transaction %d not found for address %s", lt, bill.ProxyWallet)
+}
+
+func (s *Server) fetchAndMatchAny(pending storage.Transaction, bill *storage.Bill) (OnChainTx, error) {
+	onChainTx := OnChainTx{
+		To:      bill.ProxyWallet,
+		Bounced: false,
+	}
+
+	res, err := s.tonCenterGetTransactions(bill.ProxyWallet, 30)
+	if err != nil {
+		return onChainTx, err
+	}
+
+	pendingFromRaw := address.MustParseAddr(pending.SenderAddress).StringRaw()
+	targetTo := strings.ToLower(bill.ProxyWallet)
+
+	for _, tx := range res.Result {
+		if !strings.EqualFold(strings.ToLower(tx.InMsg.Destination), targetTo) {
+			continue
+		}
+		onChainFromRaw := address.MustParseAddr(tx.InMsg.Source).StringRaw()
+		if !strings.EqualFold(onChainFromRaw, pendingFromRaw) {
+			continue
+		}
+		if tx.InMsg.Bounce || tx.InMsg.Bounced {
+			continue
+		}
+		amount, _ := strconv.ParseInt(tx.InMsg.Value, 10, 64)
+		if amount < pending.Amount {
+			continue
+		}
+
+		lt, _ := strconv.ParseUint(tx.TransactionID.LT, 10, 64)
+		onChainTx.LT = lt
+		onChainTx.Amount = amount
+		onChainTx.From = tx.InMsg.Source
+		onChainTx.Matched = true
+		return onChainTx, nil
+	}
+
+	return onChainTx, fmt.Errorf("pending transaction not found for proxy %s", bill.ProxyWallet)
 }

@@ -12,6 +12,13 @@ jobs:
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v2.3.1
+      - name: Install dependencies (if needed)
+        run: |
+          apt-get update
+          apt-get install -y build-essential
+      - name: Make version
+        run: |
+          make --version
       - name: Build and Deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -20,9 +27,10 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: 22
           script: |
-            cd /root/hackaton/go-split-api
+            cd /root/hackaton/go-split-api/
+            git fetch
             git pull
-            make
+            make build
             systemctl restart split-api-daemon.service
 
 permissions:
