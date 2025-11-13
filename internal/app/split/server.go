@@ -298,33 +298,14 @@ func (s *Server) handleHistory() http.HandlerFunc {
 			return
 		}
 
-		q := r.URL.Query()
-		page, err := strconv.Atoi(q.Get("page"))
-		if err != nil || page <= 0 {
-			page = 1
-		}
-		pageSize, err := strconv.Atoi(q.Get("pagesize"))
-		if err != nil || pageSize <= 0 {
-			pageSize = 20
-		}
-		if pageSize > 100 {
-			pageSize = 100
-		}
-
 		ctx := r.Context()
-		historyItems, total, err := s.db.GetHistory(ctx, sender, page, pageSize)
+		historyItems, err := s.db.GetHistory(ctx, sender)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		resp := historyItemsPage{
-			Page:     page,
-			PageSize: pageSize,
-			Total:    int(total),
-			Data:     historyItems,
-		}
-		renderJSON(w, resp)
+		renderJSON(w, historyItems)
 	}
 }
 

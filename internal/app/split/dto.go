@@ -26,13 +26,6 @@ type billResponse struct {
 	StateInitHash      string                `json:"state_init_hash"`
 }
 
-type historyItemsPage struct {
-	Page     int                   `json:"page"`
-	PageSize int                   `json:"page_size"`
-	Total    int                   `json:"total"`
-	Data     []storage.HistoryItem `json:"data"`
-}
-
 type createTxRequest struct {
 	Amount string           `json:"amount"`
 	OpType string           `json:"op_type"`

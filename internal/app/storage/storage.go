@@ -3,13 +3,14 @@ package storage
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/Hackathon-Apps/go-split-api/internal/app/config"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/xssnick/tonutils-go/address"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"time"
 )
 
 type Storage struct {
@@ -146,7 +147,9 @@ func (s *Storage) GetBillWithSuccessTransactions(ctx context.Context, billID uui
 	var bill Bill
 
 	if err := s.conn.WithContext(ctx).
-		Preload("Transactions", "status = ?", StatusSuccess).
+		Preload("Transactions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("status = ?", StatusSuccess).Order("created_at DESC")
+		}).
 		First(&bill, "id = ?", billID).Error; err != nil {
 		return nil, err
 	}
@@ -180,38 +183,18 @@ func (s *Storage) ListBillsByStatus(ctx context.Context, statuses ...BillStatus)
 	return bills, nil
 }
 
-func (s *Storage) GetHistory(ctx context.Context, sender string, page, pageSize int) ([]HistoryItem, int64, error) {
+func (s *Storage) GetHistory(ctx context.Context, sender string) ([]HistoryItem, error) {
 	var bills []Bill
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 1
-	}
-	offset := (page - 1) * pageSize
-
-	var total int64
-	countQ := s.conn.WithContext(ctx).
-		Model(&Bill{}).
-		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ? AND t.status = ?", sender, StatusSuccess).
-		Distinct("bills.id").
-		Count(&total)
-	if countQ.Error != nil {
-		return nil, 0, countQ.Error
-	}
 
 	q := s.conn.WithContext(ctx).
 		Model(&Bill{}).
 		Joins("JOIN transactions t ON t.bill_id = bills.id AND t.sender_address = ? AND t.status = ?", sender, StatusSuccess).
 		Preload("Transactions").
 		Group("bills.id").
-		Order("MAX(t.created_at) DESC").
-		Limit(pageSize).
-		Offset(offset)
+		Order("MAX(t.created_at) DESC")
 
 	if err := q.Find(&bills).Error; err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	senderRaw := address.MustParseAddr(sender).StringRaw()
@@ -234,5 +217,5 @@ func (s *Storage) GetHistory(ctx context.Context, sender string, page, pageSize 
 		})
 	}
 
-	return history, total, nil
+	return history, nil
 }
