@@ -77,6 +77,7 @@ func (s *Server) configureRouter() {
 	s.router.HandleFunc("/api/bills", s.handleCreateBill()).Methods(http.MethodPost)
 	s.router.HandleFunc("/api/bills/{id}", s.handleGetBill()).Methods(http.MethodGet)
 	s.router.HandleFunc("/api/bills/{id}/refund", s.handleRefundBill()).Methods(http.MethodPost)
+	s.router.HandleFunc("/api/bills/{id}/cancel", s.handleCancelBill()).Methods(http.MethodPost)
 
 	s.router.HandleFunc("/api/bills/{id}/transactions", s.handleCreateTransaction()).Methods(http.MethodPost)
 
@@ -192,6 +193,40 @@ func (s *Server) handleGetBill() http.HandlerFunc {
 		if err != nil {
 			renderErr(w, http.StatusNotFound, err.Error())
 			return
+		}
+
+		renderJSON(w, bill)
+	}
+}
+
+func (s *Server) handleCancelBill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuidFromVars(mux.Vars(r), "id")
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx := r.Context()
+		creator, err := s.walletFromHeader(r)
+		if err != nil {
+			renderErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bill, err := s.db.GetBillWithSuccessTransactions(ctx, id)
+		if err != nil {
+			renderErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		if bill.CreatorAddress != creator {
+			renderErr(w, http.StatusUnauthorized, "not your bill")
+		}
+
+		err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusDone)
+		if err != nil {
+			renderErr(w, http.StatusInternalServerError, "unable to cancel bill")
 		}
 
 		renderJSON(w, bill)
