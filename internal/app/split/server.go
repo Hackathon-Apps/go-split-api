@@ -222,11 +222,13 @@ func (s *Server) handleCancelBill() http.HandlerFunc {
 
 		if bill.CreatorAddress != creator {
 			renderErr(w, http.StatusUnauthorized, "not your bill")
+			return
 		}
 
 		err = s.db.UpdateBillStatus(ctx, bill.ID, storage.StatusDone)
 		if err != nil {
 			renderErr(w, http.StatusInternalServerError, "unable to cancel bill")
+			return
 		}
 
 		renderJSON(w, bill)
